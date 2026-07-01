@@ -141,10 +141,10 @@ const emptyData: AppData = {
 };
 
 const reservationStyles: Record<ReservationStatus, string> = {
-  ACTIVE: "border-blue-200 bg-blue-50 text-blue-700",
-  COMPLETED: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  CANCELLED: "border-slate-200 bg-slate-50 text-slate-700",
-  EXPIRED: "border-rose-200 bg-rose-50 text-rose-700",
+  ACTIVE: "border-sky-400/30 bg-sky-500/12 text-sky-200",
+  COMPLETED: "border-emerald-400/30 bg-emerald-500/12 text-emerald-200",
+  CANCELLED: "border-slate-400/25 bg-slate-500/10 text-slate-300",
+  EXPIRED: "border-rose-400/30 bg-rose-500/12 text-rose-200",
 };
 
 async function requestJson(path: string, init?: RequestInit) {
@@ -289,16 +289,16 @@ export default function Home() {
 
   if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-100 px-4 py-8 text-slate-950">
+      <main className="relative z-10 grid min-h-screen place-items-center px-4 py-8 text-slate-100">
         <Toast toast={toast} onClose={() => setToast(null)} />
-        <section className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+        <section className="glass-panel floating-card w-full max-w-md rounded-[1.75rem] p-6 sm:p-7">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300 shadow-[0_0_0_1px_rgba(56,189,248,0.06)]">
             <ShieldCheck size={22} aria-hidden="true" />
           </span>
-          <p className="mt-4 text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Terris Grupo Selector</p>
-          <h1 className="mt-2 text-2xl font-semibold">Ingresar</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Usa tu usuario interno y contrasena asignada.</p>
-          <form className="mt-6 space-y-3" onSubmit={login}>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-300/90">Terris Grupo Selector</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Ingresar</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-300">Usa tu usuario interno y contrasena asignada.</p>
+          <form className="mt-7 space-y-4" onSubmit={login}>
             <Field label="Usuario"><input className={inputClass} name="username" autoComplete="username" required /></Field>
             <Field label="Contrasena"><input className={inputClass} name="password" type="password" autoComplete="current-password" required /></Field>
             <button className={primaryButtonClass} disabled={saving || loading} type="submit">
@@ -312,16 +312,16 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-950">
+    <main className="relative z-10 min-h-screen text-slate-100">
       <Toast toast={toast} onClose={() => setToast(null)} />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center lg:justify-between">
+        <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Terris Grupo Selector</p>
-            <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300/85">Terris Grupo Selector</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               {isAdmin ? "Gestion de territorios" : "Reservas de mi grupo"}
             </h1>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-slate-300">
               {profile.full_name} - {isAdmin ? "Super admin" : data.groups[0]?.name ?? "Sin grupo asignado"}
             </p>
           </div>
@@ -365,6 +365,7 @@ export default function Home() {
           saving,
           passwordMode,
           setPasswordMode,
+          setModal,
           setTemporaryPassword,
           mutate,
           submitFromForm,
@@ -394,7 +395,7 @@ function AdminNav({
     ["users", "Usuarios"],
   ];
   return (
-    <nav className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2" aria-label="Administracion">
+    <nav className="glass-panel-soft flex gap-2 overflow-x-auto rounded-[1.35rem] p-2" aria-label="Administracion">
       {tabs.map(([id, label]) => (
         <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button">{label}</button>
       ))}
@@ -426,41 +427,41 @@ function ElderReservations({
         const expired = new Date(window.booking_deadline).getTime() < loadedAt;
         const dates = [window.saturday_date, window.sunday_date].filter(Boolean) as string[];
         return (
-          <article className="overflow-hidden rounded-lg border border-slate-200 bg-white" key={window.id}>
-            <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <article className="glass-panel floating-card overflow-hidden rounded-[1.5rem]" key={window.id}>
+            <div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-semibold">{window.name}</h2>
-                  <Badge className={expired ? "border-slate-200 bg-slate-100 text-slate-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>
+                  <h2 className="text-lg font-semibold text-white">{window.name}</h2>
+                  <Badge className={expired ? "border-slate-400/25 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>
                     {expired ? "Cerrada" : "Disponible"}
                   </Badge>
                 </div>
-                <p className="mt-2 text-sm text-slate-600">Limite para responder: {displayDateTime(window.booking_deadline)}</p>
+                <p className="mt-2 text-sm text-slate-300">Limite para responder: {displayDateTime(window.booking_deadline)}</p>
               </div>
             </div>
-            <div className="grid divide-y divide-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div className="grid divide-y divide-white/10 md:grid-cols-2 md:divide-x md:divide-y-0">
               {dates.map((date) => {
                 const dayReservations = data.reservations.filter(
                   (item) => item.reservation_window_id === window.id && item.service_date === date && item.status === "ACTIVE",
                 );
                 return (
-                  <div className="min-w-0 p-4" key={date}>
-                    <p className="text-sm font-semibold text-slate-950">
+                  <div className="min-w-0 p-5" key={date}>
+                    <p className="text-sm font-semibold text-slate-100">
                       {date === window.saturday_date ? "Sabado" : "Domingo"} {displayDate(date)}
                     </p>
                     {dayReservations.length ? (
                       <div className="mt-3 space-y-2">
                         {dayReservations.map((reservation) => (
-                          <div className="rounded-md border border-blue-200 bg-blue-50 p-3" key={reservation.id}>
+                          <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" key={reservation.id}>
                             <div className="flex items-start gap-3">
-                              <CheckCircle2 className="mt-0.5 shrink-0 text-blue-700" size={20} />
+                              <CheckCircle2 className="mt-0.5 shrink-0 text-sky-300" size={20} />
                               <div className="min-w-0">
-                                <p className="font-semibold text-blue-950">Territorio #{reservation.territories?.number}</p>
-                                <p className="mt-1 break-words text-sm text-blue-900">Salida: {reservation.departure_location}</p>
+                                <p className="font-semibold text-sky-50">Territorio #{reservation.territories?.number}</p>
+                                <p className="mt-1 break-words text-sm text-sky-100/90">Salida: {reservation.departure_location}</p>
                               </div>
                             </div>
                             {!expired ? (
-                              <div className="mt-3 flex gap-2 border-t border-blue-200 pt-3">
+                              <div className="mt-3 flex gap-2 border-t border-sky-400/15 pt-3">
                                 <button className={miniButtonClass} onClick={() => setModal({ type: "reservation", window, date, item: reservation })} type="button">
                                   <Edit3 size={15} />Editar
                                 </button>
@@ -471,7 +472,7 @@ function ElderReservations({
                         ))}
                       </div>
                     ) : (
-                      <p className="mt-3 text-sm text-slate-500">
+                      <p className="mt-3 text-sm text-slate-400">
                         {expired ? "No se envio una reserva antes del cierre." : "Todavia no agregaste territorios para este dia."}
                       </p>
                     )}
@@ -583,19 +584,19 @@ function AdminView({
         description="Confirmaciones recibidas al completar una reserva."
         action={data.notifications.some((item) => !item.read_at) ? <button className={secondaryButtonClass} onClick={() => void mutate("markNotificationRead")} type="button"><Check size={17} />Marcar leidos</button> : null}
       >
-        <div className="divide-y divide-slate-200">
+        <div className="divide-y divide-white/10">
           {data.notifications.map((notification) => (
             <div className="flex gap-3 py-4 first:pt-0 last:pb-0" key={notification.id}>
-              <span className={cn("mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md", notification.read_at ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700")}>
+              <span className={cn("mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", notification.read_at ? "border-white/10 bg-slate-800 text-slate-400" : "border-sky-400/20 bg-sky-500/12 text-sky-300")}>
                 <Bell size={17} />
               </span>
               <div className="min-w-0">
                 <p className={cn("text-sm", !notification.read_at && "font-semibold")}>{notification.message}</p>
-                <p className="mt-1 text-xs text-slate-500">{displayDateTime(notification.created_at)}</p>
+                <p className="mt-1 text-xs text-slate-400">{displayDateTime(notification.created_at)}</p>
               </div>
             </div>
           ))}
-          {!data.notifications.length ? <p className="py-6 text-center text-sm text-slate-500">Todavia no hay avisos.</p> : null}
+          {!data.notifications.length ? <p className="py-6 text-center text-sm text-slate-400">Todavia no hay avisos.</p> : null}
         </div>
       </Panel>
     );
@@ -612,21 +613,21 @@ function AdminView({
               <tr key={territory.id}>
                 <Cell>
                   <strong>Territorio #{territory.number}</strong>
-                  {!openRound ? <span className="mt-1 block text-xs text-slate-500">Sin vuelta abierta</span> : null}
+                  {!openRound ? <span className="mt-1 block text-xs text-slate-400">Sin vuelta abierta</span> : null}
                 </Cell>
                 <Cell>
                   {progress?.total_blocks ? (
                     <div className="min-w-40">
                       <div className="flex items-center gap-2">
-                        <Badge className={completed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-blue-200 bg-blue-50 text-blue-700"}>
+                        <Badge className={completed ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-sky-400/30 bg-sky-500/12 text-sky-200"}>
                           {completed ? "Completo" : `${progress.completed_blocks}/${progress.total_blocks}`}
                         </Badge>
-                        <span className="text-xs text-slate-500">en {openRound?.name ?? "la vuelta"}</span>
+                        <span className="text-xs text-slate-400">en {openRound?.name ?? "la vuelta"}</span>
                       </div>
-                      {!completed && progress.completed_blocks > 0 ? <p className="mt-1 text-xs text-slate-500">Faltan {progress.pending_labels.join(", ")}</p> : null}
+                      {!completed && progress.completed_blocks > 0 ? <p className="mt-1 text-xs text-slate-400">Faltan {progress.pending_labels.join(", ")}</p> : null}
                     </div>
                   ) : (
-                    <span className="text-sm text-slate-500">Sin manzanas</span>
+                    <span className="text-sm text-slate-400">Sin manzanas</span>
                   )}
                 </Cell>
                 <Cell>{data.blocks.filter((block) => block.territory_id === territory.id).length}</Cell>
@@ -649,7 +650,7 @@ function AdminView({
       <Panel title="Vueltas" description="Crea varias vueltas por ano y administra su estado." action={<AddButton onClick={() => setModal({ type: "round" })}>Vuelta</AddButton>}>
         <DataTable headers={["Ano", "Vuelta", "Estado", "Manzanas", "Acciones"]}>
           {data.rounds.map((round) => (
-            <tr key={round.id}><Cell>{round.year}</Cell><Cell><strong>{round.name}</strong></Cell><Cell><Badge className={round.status === "OPEN" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}>{round.status === "OPEN" ? "Abierta" : "Cerrada"}</Badge></Cell><Cell>{data.blockStatuses.filter((item) => item.annual_round_id === round.id).length}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "round", item: round })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "annual_rounds", id: round.id })} /></Actions></tr>
+            <tr key={round.id}><Cell>{round.year}</Cell><Cell><strong>{round.name}</strong></Cell><Cell><Badge className={round.status === "OPEN" ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-slate-400/25 bg-slate-500/10 text-slate-300"}>{round.status === "OPEN" ? "Abierta" : "Cerrada"}</Badge></Cell><Cell>{data.blockStatuses.filter((item) => item.annual_round_id === round.id).length}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "round", item: round })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "annual_rounds", id: round.id })} /></Actions></tr>
           ))}
         </DataTable>
       </Panel>
@@ -672,7 +673,7 @@ function AdminView({
         {data.profiles.map((item) => (
           <tr key={item.id}>
             <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.groups?.name ?? "-"}</Cell><Cell>{item.role === "ADMIN" ? "Super admin" : "Anciano"}</Cell><Cell>{item.active ? "Si" : "No"}</Cell>
-            <Cell>{item.must_change_password ? <Badge className="border-amber-200 bg-amber-50 text-amber-700">Temporal</Badge> : <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Activa</Badge>}</Cell>
+            <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
             <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.role !== "ADMIN" ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
           </tr>
         ))}
@@ -687,6 +688,7 @@ function renderModal({
   saving,
   passwordMode,
   setPasswordMode,
+  setModal,
   setTemporaryPassword,
   mutate,
   submitFromForm,
@@ -696,6 +698,7 @@ function renderModal({
   saving: boolean;
   passwordMode: "manual" | "generate";
   setPasswordMode: (mode: "manual" | "generate") => void;
+  setModal: (modal: ModalState) => void;
   setTemporaryPassword: (password: string) => void;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
   submitFromForm: (event: FormEvent<HTMLFormElement>, action: string, map: (form: FormData) => Record<string, unknown>) => void;
@@ -785,7 +788,8 @@ function renderModal({
       </FormModal>
     );
   }
-  return (
+  if (modal.type === "password") {
+    return (
     <FormModal title={`Cambiar contrasena de @${modal.item.username}`} onSubmit={(event) => submitFromForm(event, "updateUser", (form) => ({ id: modal.item.id, password: form.get("password"), must_change_password: true }))} saving={saving}>
       <Field label="Nueva contrasena"><input className={inputClass} name="password" type="password" minLength={8} required /></Field>
       <button className={secondaryButtonClass} type="button" onClick={() => {
@@ -795,7 +799,37 @@ function renderModal({
         });
       }}><Wand2 size={16} />Generar temporal</button>
     </FormModal>
-  );
+    );
+  }
+  if (modal.type === "adminReservation") {
+    return (
+      <FormModal title="Reserva administrativa" subtitle={`${modal.window.name} - selecciona una fecha para continuar`} hideSubmit saving={saving} onSubmit={(event) => event.preventDefault()}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            { label: "Sabado", date: modal.window.saturday_date },
+            { label: "Domingo", date: modal.window.sunday_date },
+          ]
+            .filter((item): item is { label: string; date: string } => Boolean(item.date))
+            .map((item) => (
+              <button
+                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-left text-sm text-slate-300 transition hover:-translate-y-0.5 hover:border-sky-400/25 hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                key={item.label}
+                onClick={() => setModal({ type: "reservation", window: modal.window, date: item.date })}
+                type="button"
+              >
+                <p className="font-semibold text-white">{item.label}</p>
+                <p className="mt-1 text-slate-400">{displayDate(item.date)}</p>
+                <p className="mt-3 text-xs uppercase tracking-[0.14em] text-sky-300/80">Abrir seleccion</p>
+              </button>
+            ))}
+        </div>
+        <p className="rounded-2xl border border-sky-400/15 bg-sky-500/10 px-4 py-3 text-sm leading-6 text-sky-100/90">
+          Elige el dia y pasaras directamente al selector de territorios con el nuevo estilo oscuro.
+        </p>
+      </FormModal>
+    );
+  }
+  return null;
 }
 
 function TerritoryBlocksModal({
@@ -882,9 +916,9 @@ function TerritoryBlocksModal({
       }}
     >
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Manzanas</p>
-        <h2 className="mt-1 text-xl font-semibold">Territorio #{territory.number}</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300/85">Manzanas</p>
+        <h2 className="mt-2 text-xl font-semibold text-white">Territorio #{territory.number}</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-300">
           {round ? `${round.name} (${round.year})` : "Selecciona una vuelta para guardar el avance."}
         </p>
       </div>
@@ -900,12 +934,12 @@ function TerritoryBlocksModal({
         </select>
       </Field>
 
-      <div className="flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-900">{completedTotal}/{total || 0} completadas</p>
-          <p className="mt-1 text-xs text-slate-500">{total > 0 && completedTotal === total ? "El territorio queda completo en esta vuelta." : "Toca cada manzana para marcarla o desmarcarla."}</p>
+          <p className="text-sm font-semibold text-white">{completedTotal}/{total || 0} completadas</p>
+          <p className="mt-1 text-xs text-slate-400">{total > 0 && completedTotal === total ? "El territorio queda completo en esta vuelta." : "Toca cada manzana para marcarla o desmarcarla."}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2 sm:mt-0">
           <button className={miniButtonClass} type="button" onClick={addBlock}><Plus size={15} />Agregar manzana</button>
           <button className={miniButtonClass} type="button" onClick={selectAll} disabled={!total}>Todas</button>
           <button className={miniButtonClass} type="button" onClick={clearAll} disabled={!total}>Limpiar</button>
@@ -919,8 +953,8 @@ function TerritoryBlocksModal({
             return (
               <button
                 className={cn(
-                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-md border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-                  selected ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:bg-blue-50",
+                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
+                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-sky-400/30 hover:bg-sky-500/8",
                 )}
                 key={block.id}
                 onClick={() => toggle(block.id)}
@@ -937,8 +971,8 @@ function TerritoryBlocksModal({
             return (
               <button
                 className={cn(
-                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-                  selected ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100",
+                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
+                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-sky-400/35 bg-sky-500/10 text-sky-100 hover:bg-sky-500/14",
                 )}
                 key={id}
                 onClick={() => toggle(id)}
@@ -951,9 +985,9 @@ function TerritoryBlocksModal({
           })}
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-          <Grid3X3 className="mx-auto text-slate-400" size={28} />
-          <p className="mt-3 text-sm font-medium text-slate-700">Este territorio todavia no tiene manzanas.</p>
+        <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-8 text-center">
+          <Grid3X3 className="mx-auto text-slate-500" size={28} />
+          <p className="mt-3 text-sm font-medium text-slate-200">Este territorio todavia no tiene manzanas.</p>
           <button className={primarySmallButtonClass + " mt-4"} type="button" onClick={addBlock}><Plus size={16} />Agregar primera manzana</button>
         </div>
       )}
@@ -965,44 +999,44 @@ function TerritoryBlocksModal({
   );
 }
 
-const inputClass = "mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100";
-const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
-const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
-const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
-const compactSelectClass = "min-h-10 cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100";
+const inputClass = "mt-1 min-h-11 w-full rounded-2xl border border-white/12 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] outline-none transition placeholder:text-slate-500 focus:border-sky-400/60 focus:bg-slate-950 focus:ring-4 focus:ring-sky-500/15 disabled:cursor-not-allowed disabled:bg-slate-900/80 disabled:text-slate-500";
+const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(14,165,233,0.28)] transition hover:-translate-y-0.5 hover:from-sky-400 hover:to-cyan-300 hover:shadow-[0_16px_36px_rgba(14,165,233,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
+const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(14,165,233,0.22)] transition hover:-translate-y-0.5 hover:from-sky-400 hover:to-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
+const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:-translate-y-0.5 hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
+const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
+const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/12 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-sky-400/60 focus:ring-4 focus:ring-sky-500/15 disabled:cursor-not-allowed disabled:bg-slate-900/70";
 
 function tabClass(active: boolean) {
-  return cn("inline-flex min-h-10 shrink-0 cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", active ? "bg-blue-700 text-white" : "bg-white text-slate-700 hover:bg-slate-50");
+  return cn("inline-flex min-h-10 shrink-0 cursor-pointer items-center gap-2 rounded-2xl px-3.5 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400", active ? "bg-gradient-to-r from-sky-500 to-cyan-400 text-slate-950 shadow-[0_8px_24px_rgba(14,165,233,0.28)]" : "bg-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white");
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-sm font-medium">{label}{children}</label>;
+  return <label className="block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: string } | null; onClose: () => void }) {
   if (!toast) return null;
-  return <div className={cn("fixed right-4 top-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border bg-white px-4 py-3 text-sm shadow-lg", toast.type === "success" ? "border-emerald-200 text-emerald-800" : "border-rose-200 text-rose-800")} role="status"><CheckCircle2 size={18} /><span>{toast.text}</span><button className="ml-2 cursor-pointer text-slate-500" onClick={onClose} type="button" aria-label="Cerrar"><X size={16} /></button></div>;
+  return <div className={cn("modal-panel glass-panel fixed right-4 top-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3 text-sm", toast.type === "success" ? "border-emerald-400/25 text-emerald-100" : "border-rose-400/25 text-rose-100")} role="status"><CheckCircle2 size={18} /><span>{toast.text}</span><button className="ml-2 cursor-pointer rounded-full p-1 text-slate-400 transition hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Cerrar"><X size={16} /></button></div>;
 }
 function TemporaryPasswordModal({ password, onClose }: { password: string; onClose: () => void }) {
   useEffect(() => {
     if (password) void navigator.clipboard?.writeText(password);
   }, [password]);
   if (!password) return null;
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 px-4 py-6"><div className="w-full max-w-md rounded-lg border border-emerald-200 bg-white shadow-xl"><div className="border-b border-slate-200 p-5"><h2 className="text-xl font-semibold">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-slate-600">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 font-mono text-sm font-semibold text-emerald-900">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={onClose}>Listo</button></div></div></div></div>;
+  return <div className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/68 px-4 py-6 backdrop-blur-md"><div className="modal-panel glass-panel w-full max-w-md rounded-[1.75rem] border-emerald-400/20"><div className="border-b border-white/10 p-5"><h2 className="text-xl font-semibold text-white">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-slate-300">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={onClose}>Listo</button></div></div></div></div>;
 }
 function AddButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;
 }
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
-  return <article className="rounded-lg border border-slate-200 bg-white p-4"><span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-blue-50 text-blue-700">{icon}</span><p className="mt-4 text-sm font-medium text-slate-600">{label}</p><p className="mt-1 text-3xl font-semibold">{value}</p></article>;
+  return <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4"><span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300">{icon}</span><p className="mt-4 text-sm font-medium text-slate-300">{label}</p><p className="mt-1 text-3xl font-semibold text-white">{value}</p></article>;
 }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return <section className="rounded-lg border border-slate-200 bg-white px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-md bg-blue-50 text-blue-700">{icon}</span><h2 className="mt-4 text-lg font-semibold">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">{text}</p></section>;
+  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300">{icon}</span><h2 className="mt-4 text-lg font-semibold text-white">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-300">{text}</p></section>;
 }
 function Panel({ title, description, action, children }: { title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section className="rounded-lg border border-slate-200 bg-white"><div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold">{title}</h2><p className="mt-1 text-sm text-slate-600">{description}</p></div>{action}</div><div className="space-y-4 p-4">{children}</div></section>;
+  return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-white">{title}</h2><p className="mt-1 text-sm text-slate-300">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
 }
 function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return <div className="overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-[0.08em] text-slate-500"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{children}</tbody></table></div>;
+  return <div className="overflow-x-auto rounded-2xl border border-white/8 bg-black/10"><table className="w-full min-w-[760px] border-collapse text-left text-sm text-slate-200"><thead className="bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-slate-400"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-white/8">{children}</tbody></table></div>;
 }
 function Cell({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3 align-middle">{children}</td>;
@@ -1014,15 +1048,15 @@ function Badge({ children, className }: { children: React.ReactNode; className: 
   return <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", className)}>{children}</span>;
 }
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-3 text-slate-200 transition hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
 }
 function DeleteButton({ onClick, label = "Eliminar" }: { onClick: () => void; label?: string }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-3 text-rose-700 transition-colors hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
 }
 function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: () => void; children: React.ReactNode }) {
   if (!modal) return null;
-  return <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-slate-950/40 px-4 py-6"><div className={cn("w-full rounded-lg border border-slate-200 bg-white shadow-xl", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-slate-200 p-3"><button className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={onClose} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className="modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-slate-950/72 px-4 py-6 backdrop-blur-md"><div className={cn("modal-panel glass-panel w-full rounded-[1.75rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onClick={onClose} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
-function FormModal({ title, subtitle, saving, onSubmit, children }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode }) {
-  return <form className="space-y-4 p-5" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-600">{subtitle}</p> : null}</div><div className="space-y-3">{children}</div><button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button></form>;
+function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
+  return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-300">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;
 }
