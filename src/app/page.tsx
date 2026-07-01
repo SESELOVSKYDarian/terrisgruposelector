@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bell,
   CalendarClock,
@@ -14,7 +14,7 @@ import {
   Grid3X3,
   KeyRound,
   LogOut,
-  Map,
+  Map as MapIcon,
   MapPin,
   Plus,
   RefreshCw,
@@ -208,10 +208,6 @@ export default function Home() {
 
   const isAdmin = profile?.role === "ADMIN";
   const openRound = data.rounds.find((round) => round.status === "OPEN");
-  const activeReservations = useMemo(
-    () => data.reservations.filter((reservation) => reservation.status === "ACTIVE"),
-    [data.reservations],
-  );
   const unreadCount = data.notifications.filter((notification) => !notification.read_at).length;
 
   const loadData = useCallback(async (options?: { throwOnError?: boolean }) => {
@@ -422,15 +418,15 @@ function AdminNav({
   onLogout: () => void;
   onRefresh: () => void;
 }) {
-  const tabs = [
-    ["dashboard", "Resumen", <ShieldCheck size={17} key="dashboard" />],
-    ["windows", "Ventanas", <CalendarDays size={17} key="windows" />],
-    ["reservations", "Reservas", <CalendarClock size={17} key="reservations" />],
-    ["territories", "Territorios", <Map size={17} key="territories" />],
-    ["rounds", "Vueltas", <Grid3X3 size={17} key="rounds" />],
-    ["notifications", `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, <Bell size={17} key="notifications" />],
-    ["groups", "Grupos", <Users size={17} key="groups" />],
-    ["users", "Usuarios", <KeyRound size={17} key="users" />],
+  const tabs: Array<{ id: string; label: string; icon: ReactNode }> = [
+    { id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> },
+    { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
+    { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
+    { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
+    { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
+    { id: "notifications", label: `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, icon: <Bell size={17} /> },
+    { id: "groups", label: "Grupos", icon: <Users size={17} /> },
+    { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
   ];
   return (
     <aside className="glass-panel sticky top-5 flex h-fit flex-col gap-5 rounded-[1.75rem] p-4" aria-label="Administracion">
@@ -454,7 +450,7 @@ function AdminNav({
       </div>
 
       <nav className="space-y-1" aria-label="Secciones">
-        {tabs.map(([id, label, icon]) => (
+        {tabs.map(({ id, label, icon }) => (
           <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button">
             {icon}
             {label}
@@ -835,7 +831,7 @@ function AdminDashboard({
   return (
     <div className="space-y-5">
       <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-        <Metric icon={<Map size={20} />} label="Territorios activos" value={data.territories.length} />
+        <Metric icon={<MapIcon size={20} />} label="Territorios activos" value={data.territories.length} />
         <Metric icon={<CalendarDays size={20} />} label="Respuestas activas" value={answeredReservations.length} />
         <Metric icon={<ShieldCheck size={20} />} label="Bloqueos vigentes" value={blockedReservations.length} />
         <Metric icon={<Bell size={20} />} label="Avisos pendientes" value={data.notifications.filter((item) => !item.read_at).length} />
@@ -1306,7 +1302,7 @@ const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-wh
 function tabClass(active: boolean) {
   return cn("inline-flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30", active ? "border border-white/12 bg-white/[0.08] text-white" : "border border-transparent bg-transparent text-slate-400 hover:bg-white/[0.04] hover:text-white");
 }
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: string } | null; onClose: () => void }) {
