@@ -1,0 +1,10 @@
+-- Ya no se crea el super admin a mano.
+-- Configura en .env / Vercel:
+--
+-- SUPER_ADMIN_USERNAME=DaSeselovsky
+-- SUPER_ADMIN_PASSWORD=tu-contrasena
+-- SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
+-- SESSION_SECRET=un-secreto-largo
+--
+-- La primera vez que inicies sesion con ese usuario y contrasena,
+-- la app crea/actualiza el perfil ADMIN y guarda password_hash en public.profiles.
