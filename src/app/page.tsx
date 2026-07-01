@@ -73,7 +73,18 @@ type Reservation = {
   profiles?: Pick<Profile, "full_name" | "username"> | null;
   reservation_windows?: Pick<ReservationWindow, "name" | "booking_deadline"> | null;
 };
-type BlockRoundStatus = { id: string; annual_round_id: string; block_id: string; status: BlockStatus };
+type BlockRoundStatus = {
+  id: string;
+  annual_round_id: string;
+  block_id: string;
+  status: BlockStatus;
+  updated_at?: string;
+  blocks?: {
+    label: string;
+    territory_id: string;
+    territories?: Pick<Territory, "number" | "name"> | null;
+  } | null;
+};
 type TerritoryProgress = {
   territory_id: string;
   total_blocks: number;
@@ -186,7 +197,7 @@ function territorySelectionLabel(territory: Territory, progress?: TerritoryProgr
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [data, setData] = useState<AppData>(emptyData);
-  const [activeView, setActiveView] = useState("windows");
+  const [activeView, setActiveView] = useState("dashboard");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -314,47 +325,66 @@ export default function Home() {
   return (
     <main className="relative z-10 min-h-screen text-slate-100">
       <Toast toast={toast} onClose={() => setToast(null)} />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300/85">Terris Grupo Selector</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-              {isAdmin ? "Gestion de territorios" : "Reservas de mi grupo"}
-            </h1>
-            <p className="mt-2 text-sm text-slate-300">
-              {profile.full_name} - {isAdmin ? "Super admin" : data.groups[0]?.name ?? "Sin grupo asignado"}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
-              <RefreshCw size={18} aria-hidden="true" />Actualizar
-            </button>
-            <button className={secondaryButtonClass} onClick={logout} type="button">
-              <LogOut size={18} aria-hidden="true" />Salir
-            </button>
-          </div>
-        </header>
-
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
         {isAdmin ? (
-          <>
-            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Metric icon={<Map size={20} />} label="Territorios" value={data.territories.length} />
-              <Metric icon={<CalendarDays size={20} />} label="Reservas activas" value={activeReservations.length} />
-              <Metric icon={<CalendarClock size={20} />} label="Ventanas activas" value={data.reservationWindows.filter((item) => item.active).length} />
-              <Metric icon={<Bell size={20} />} label="Avisos nuevos" value={unreadCount} />
-            </section>
-            <AdminNav activeView={activeView} unreadCount={unreadCount} onChange={setActiveView} />
-            <AdminView
+          <div className="grid gap-5 xl:grid-cols-[272px_minmax(0,1fr)]">
+            <AdminNav
               activeView={activeView}
+              currentUser={profile}
               data={data}
-              loadedAt={loadedAt}
-              openRound={openRound}
-              setModal={setModal}
-              mutate={mutate}
+              unreadCount={unreadCount}
+              onChange={setActiveView}
+              onLogout={logout}
+              onRefresh={() => void loadData()}
             />
-          </>
+            <div className="space-y-5">
+              <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Panel administrativo</p>
+                  <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                    Gestion de territorios y reservas
+                  </h1>
+                  <p className="mt-2 max-w-3xl text-sm text-slate-400">
+                    Controla ventanas, bloqueos administrativos, progreso por territorio y el estado general de cada vuelta.
+                  </p>
+                </div>
+                <div className="glass-panel-soft rounded-2xl px-4 py-3 text-sm text-slate-300">
+                  <p className="font-medium text-white">{profile.full_name}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">Super admin</p>
+                </div>
+              </header>
+
+              <AdminView
+                activeView={activeView}
+                data={data}
+                loadedAt={loadedAt}
+                openRound={openRound}
+                setModal={setModal}
+                mutate={mutate}
+              />
+            </div>
+          </div>
         ) : (
-          <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
+          <>
+            <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Reservas de mi grupo</h1>
+                <p className="mt-2 text-sm text-slate-400">
+                  {profile.full_name} - {data.groups[0]?.name ?? "Sin grupo asignado"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
+                  <RefreshCw size={18} aria-hidden="true" />Actualizar
+                </button>
+                <button className={secondaryButtonClass} onClick={logout} type="button">
+                  <LogOut size={18} aria-hidden="true" />Salir
+                </button>
+              </div>
+            </header>
+            <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
+          </>
         )}
       </div>
 
@@ -365,7 +395,6 @@ export default function Home() {
           saving,
           passwordMode,
           setPasswordMode,
-          setModal,
           setTemporaryPassword,
           mutate,
           submitFromForm,
@@ -378,28 +407,70 @@ export default function Home() {
 
 function AdminNav({
   activeView,
+  currentUser,
+  data,
   unreadCount,
   onChange,
+  onLogout,
+  onRefresh,
 }: {
   activeView: string;
+  currentUser: Profile;
+  data: AppData;
   unreadCount: number;
   onChange: (view: string) => void;
+  onLogout: () => void;
+  onRefresh: () => void;
 }) {
   const tabs = [
-    ["windows", "Ventanas"],
-    ["reservations", "Reservas"],
-    ["notifications", `Avisos${unreadCount ? ` (${unreadCount})` : ""}`],
-    ["territories", "Territorios"],
-    ["rounds", "Vueltas"],
-    ["groups", "Grupos"],
-    ["users", "Usuarios"],
+    ["dashboard", "Resumen", <ShieldCheck size={17} key="dashboard" />],
+    ["windows", "Ventanas", <CalendarDays size={17} key="windows" />],
+    ["reservations", "Reservas", <CalendarClock size={17} key="reservations" />],
+    ["territories", "Territorios", <Map size={17} key="territories" />],
+    ["rounds", "Vueltas", <Grid3X3 size={17} key="rounds" />],
+    ["notifications", `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, <Bell size={17} key="notifications" />],
+    ["groups", "Grupos", <Users size={17} key="groups" />],
+    ["users", "Usuarios", <KeyRound size={17} key="users" />],
   ];
   return (
-    <nav className="glass-panel-soft flex gap-2 overflow-x-auto rounded-[1.35rem] p-2" aria-label="Administracion">
-      {tabs.map(([id, label]) => (
-        <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button">{label}</button>
-      ))}
-    </nav>
+    <aside className="glass-panel sticky top-5 flex h-fit flex-col gap-5 rounded-[1.75rem] p-4" aria-label="Administracion">
+      <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Terris Grupo Selector</p>
+        <p className="mt-3 text-lg font-semibold text-white">Panel principal</p>
+        <p className="mt-2 text-sm leading-6 text-slate-400">
+          Navega rápido entre ventanas, bloqueos, progreso y usuarios sin perder contexto.
+        </p>
+      </div>
+
+      <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
+        <p className="text-sm font-medium text-white">{currentUser.full_name}</p>
+        <p className="mt-1 text-sm text-slate-400">@{currentUser.username}</p>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <SidebarMiniStat label="Ventanas" value={data.reservationWindows.filter((item) => item.active).length} />
+          <SidebarMiniStat label="Activas" value={data.reservations.filter((item) => item.status === "ACTIVE").length} />
+          <SidebarMiniStat label="Avisos" value={unreadCount} />
+          <SidebarMiniStat label="Vueltas" value={data.rounds.length} />
+        </div>
+      </div>
+
+      <nav className="space-y-1" aria-label="Secciones">
+        {tabs.map(([id, label, icon]) => (
+          <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button">
+            {icon}
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mt-auto flex flex-col gap-2">
+        <button className={secondaryButtonClass} onClick={onRefresh} type="button">
+          <RefreshCw size={17} />Actualizar
+        </button>
+        <button className={secondaryButtonClass} onClick={onLogout} type="button">
+          <LogOut size={17} />Salir
+        </button>
+      </div>
+    </aside>
   );
 }
 
@@ -507,10 +578,14 @@ function AdminView({
   setModal: (modal: ModalState) => void;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
+  if (activeView === "dashboard") {
+    return <AdminDashboard data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} />;
+  }
+
   if (activeView === "windows") {
     const elderGroupIds = new Set(data.profiles.filter((profile) => profile.role === "ANCIANO" && profile.active && profile.group_id).map((profile) => profile.group_id));
     return (
-      <Panel title="Ventanas de reserva" description="Publica las fechas y define hasta cuando los ancianos pueden responder." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
+      <Panel title="Ventanas de reserva" description="Publica fechas, revisa cuántos territorios quedaron bloqueados y entra al bloqueo administrativo con un solo clic." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
         <DataTable headers={["Ventana", "Fechas", "Limite", "Respuestas", "Estado", "Acciones"]}>
           {data.reservationWindows.map((window) => {
             const elderWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && !item.reserved_by_admin);
@@ -525,11 +600,11 @@ function AdminView({
                 <Cell>{displayDateTime(window.booking_deadline)}</Cell>
                 <Cell>
                   <strong>{elderWindowReservations.length}/{expectedReservations}</strong> reservas
-                  {adminWindowReservations.length ? <span className="mt-1 block text-xs text-slate-500">{adminWindowReservations.length} admin</span> : null}
+                  {adminWindowReservations.length ? <span className="mt-1 block text-xs text-slate-400">{adminWindowReservations.length} bloqueos admin</span> : null}
                 </Cell>
-                <Cell><Badge className={!window.active || expired ? "border-slate-200 bg-slate-100 text-slate-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>{!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}</Badge></Cell>
+                <Cell><Badge className={!window.active || expired ? "border-slate-500/30 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>{!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}</Badge></Cell>
                 <Actions>
-                  <IconButton label="Reservar territorios" onClick={() => setModal({ type: "adminReservation", window })}><CalendarDays size={16} /></IconButton>
+                  <IconButton label="Bloquear territorios" onClick={() => setModal({ type: "adminReservation", window })}><ShieldCheck size={16} /></IconButton>
                   <IconButton label="Editar" onClick={() => setModal({ type: "window", item: window })}><Edit3 size={16} /></IconButton>
                   <DeleteButton onClick={() => void mutate("deleteWindow", { id: window.id })} />
                 </Actions>
@@ -543,17 +618,17 @@ function AdminView({
 
   if (activeView === "reservations") {
     return (
-      <Panel title="Reservas recibidas" description="Todas las respuestas enviadas por los ancianos para las ventanas publicadas.">
+      <Panel title="Reservas y bloqueos" description="Historial operativo de respuestas de ancianos y bloqueos administrativos dentro de cada ventana.">
         <DataTable headers={["Ventana", "Fecha", "Territorio", "Origen", "Responsable", "Lugar de salida", "Estado", "Acciones"]}>
           {data.reservations.map((reservation) => (
             <tr key={reservation.id}>
               <Cell>{reservation.reservation_windows?.name ?? "-"}</Cell>
               <Cell>{displayDate(reservation.service_date)}<span className="mt-1 block text-xs text-slate-500">{serviceDayLabels[reservation.service_day]}</span></Cell>
               <Cell><strong>#{reservation.territories?.number}</strong></Cell>
-              <Cell>{reservation.reserved_by_admin ? <Badge className="border-amber-200 bg-amber-50 text-amber-700">Admin</Badge> : reservation.groups?.name ?? "-"}</Cell>
+              <Cell>{reservation.reserved_by_admin ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Bloqueo</Badge> : reservation.groups?.name ?? "-"}</Cell>
               <Cell>{reservation.profiles?.full_name ?? "-"}</Cell>
               <Cell>
-                {reservation.departure_location}
+                {reservation.reserved_by_admin ? "Bloqueado por administracion" : reservation.departure_location}
                 {reservation.reserved_by_admin && reservation.admin_note ? <span className="mt-1 block max-w-56 break-words text-xs text-slate-500">{reservation.admin_note}</span> : null}
               </Cell>
               <Cell><Badge className={reservationStyles[reservation.status]}>{reservationStatusLabels[reservation.status]}</Badge></Cell>
@@ -682,13 +757,234 @@ function AdminView({
   );
 }
 
+function getTerritoryCompletionHistory(data: AppData) {
+  const blockTotals = new Map<string, number>();
+  for (const block of data.blocks) {
+    blockTotals.set(block.territory_id, (blockTotals.get(block.territory_id) ?? 0) + 1);
+  }
+
+  const grouped = new Map<string, {
+    territoryId: string;
+    roundId: string;
+    territoryNumber: number | string;
+    territoryName: string;
+    completedBlocks: Set<string>;
+    updatedAt: string;
+  }>();
+
+  for (const status of data.blockStatuses) {
+    if (status.status !== "COMPLETED" || !status.blocks?.territory_id || !status.updated_at) continue;
+    const territoryId = status.blocks.territory_id;
+    const key = `${status.annual_round_id}:${territoryId}`;
+    const current = grouped.get(key) ?? {
+      territoryId,
+      roundId: status.annual_round_id,
+      territoryNumber: status.blocks.territories?.number ?? "?",
+      territoryName: status.blocks.territories?.name ?? `Territorio ${status.blocks.territories?.number ?? ""}`.trim(),
+      completedBlocks: new Set<string>(),
+      updatedAt: status.updated_at,
+    };
+    current.completedBlocks.add(status.block_id);
+    if (new Date(status.updated_at).getTime() > new Date(current.updatedAt).getTime()) current.updatedAt = status.updated_at;
+    grouped.set(key, current);
+  }
+
+  const roundMap = new Map(data.rounds.map((round) => [round.id, round]));
+
+  return [...grouped.values()]
+    .filter((entry) => {
+      const totalBlocks = blockTotals.get(entry.territoryId) ?? 0;
+      return totalBlocks > 0 && entry.completedBlocks.size === totalBlocks;
+    })
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .map((entry) => ({
+      ...entry,
+      round: roundMap.get(entry.roundId),
+    }));
+}
+
+function SidebarMiniStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function AdminDashboard({
+  data,
+  loadedAt,
+  openRound,
+  setModal,
+}: {
+  data: AppData;
+  loadedAt: number;
+  openRound?: Round;
+  setModal: (modal: ModalState) => void;
+}) {
+  const activeWindows = data.reservationWindows.filter((item) => item.active);
+  const blockedReservations = data.reservations.filter((item) => item.reserved_by_admin && item.status === "ACTIVE");
+  const answeredReservations = data.reservations.filter((item) => !item.reserved_by_admin && item.status === "ACTIVE");
+  const completedTerritories = data.territoryProgress.filter((item) => item.total_blocks > 0 && item.completed_blocks === item.total_blocks).length;
+  const completionHistory = getTerritoryCompletionHistory(data).slice(0, 6);
+  const windowsHistory = [...data.reservationWindows]
+    .sort((a, b) => new Date(b.booking_deadline).getTime() - new Date(a.booking_deadline).getTime())
+    .slice(0, 6);
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <Metric icon={<Map size={20} />} label="Territorios activos" value={data.territories.length} />
+        <Metric icon={<CalendarDays size={20} />} label="Respuestas activas" value={answeredReservations.length} />
+        <Metric icon={<ShieldCheck size={20} />} label="Bloqueos vigentes" value={blockedReservations.length} />
+        <Metric icon={<Bell size={20} />} label="Avisos pendientes" value={data.notifications.filter((item) => !item.read_at).length} />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1.25fr_0.95fr]">
+        <Panel
+          title="Ventanas recientes"
+          description="Un vistazo rápido para entrar a bloquear, editar o revisar el estado de cada ventana."
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            {windowsHistory.map((window) => {
+              const expired = new Date(window.booking_deadline).getTime() < loadedAt;
+              const blocked = data.reservations.filter((item) => item.reservation_window_id === window.id && item.reserved_by_admin && item.status === "ACTIVE").length;
+              const answered = data.reservations.filter((item) => item.reservation_window_id === window.id && !item.reserved_by_admin && item.status === "ACTIVE").length;
+              const dates = [window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" · ");
+              return (
+                <article className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4" key={window.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{window.name}</p>
+                      <p className="mt-1 text-sm text-slate-400">{dates || "Sin fechas"}</p>
+                    </div>
+                    <Badge className={!window.active || expired ? "border-slate-500/30 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>
+                      {!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                    <DashboardKpi label="Ancianos" value={answered} />
+                    <DashboardKpi label="Bloqueados" value={blocked} />
+                  </div>
+                  <p className="mt-4 text-xs uppercase tracking-[0.14em] text-slate-500">
+                    Limite {displayDateTime(window.booking_deadline)}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button className={secondaryButtonClass} onClick={() => setModal({ type: "adminReservation", window })} type="button">
+                      <ShieldCheck size={16} />Bloquear
+                    </button>
+                    <button className={secondaryButtonClass} onClick={() => setModal({ type: "window", item: window })} type="button">
+                      <Edit3 size={16} />Editar
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </Panel>
+
+        <Panel
+          title="Estado de la vuelta"
+          description="Resumen breve del avance actual y de los últimos territorios completados."
+        >
+          <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
+            <p className="text-sm font-medium text-slate-400">Vuelta abierta</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{openRound?.name ?? "Sin vuelta abierta"}</p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <DashboardKpi label="Ventanas activas" value={activeWindows.length} />
+              <DashboardKpi label="Territorios completos" value={completedTerritories} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            {completionHistory.length ? completionHistory.map((entry) => (
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-3" key={`${entry.roundId}-${entry.territoryId}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-white">Territorio #{entry.territoryNumber}</p>
+                    <p className="mt-1 text-sm text-slate-400">{entry.round?.name ?? "Vuelta"} · {displayDateTime(entry.updatedAt)}</p>
+                  </div>
+                  <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Completo</Badge>
+                </div>
+              </div>
+            )) : <p className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-5 text-sm text-slate-400">Todavia no hay territorios completados registrados.</p>}
+          </div>
+        </Panel>
+      </section>
+    </div>
+  );
+}
+
+function DashboardKpi({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2.5">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function TerritoryChoiceList({
+  territories,
+  progressById,
+  blockedIds,
+  name,
+  type,
+  defaultValue,
+  allowValue,
+}: {
+  territories: Territory[];
+  progressById: Map<string, TerritoryProgress>;
+  blockedIds: Set<string>;
+  name: string;
+  type: "checkbox" | "radio";
+  defaultValue?: string;
+  allowValue?: string;
+}) {
+  return (
+    <div className="grid max-h-[22rem] gap-2 overflow-y-auto rounded-[1.35rem] border border-white/8 bg-black/20 p-2">
+      {territories.map((territory) => {
+        const progress = progressById.get(territory.id);
+        const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
+        const blocked = blockedIds.has(territory.id);
+        const disabled = territory.id === allowValue ? false : blocked || completed;
+        return (
+          <label
+            className={cn(
+              "group flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition",
+              disabled
+                ? "cursor-not-allowed border-white/6 bg-white/[0.02] text-slate-500"
+                : "border-white/8 bg-white/[0.03] text-slate-100 hover:border-white/14 hover:bg-white/[0.05]",
+            )}
+            key={territory.id}
+          >
+            <input
+              className="h-4 w-4 accent-white"
+              defaultChecked={defaultValue === territory.id}
+              disabled={disabled}
+              name={name}
+              type={type}
+              value={territory.id}
+            />
+            <div className="min-w-0">
+              <p className="font-medium">{territorySelectionLabel(territory, progress)}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {completed ? "Territorio completado" : blocked ? "Ya reservado o bloqueado" : "Disponible"}
+              </p>
+            </div>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderModal({
   modal,
   data,
   saving,
   passwordMode,
   setPasswordMode,
-  setModal,
   setTemporaryPassword,
   mutate,
   submitFromForm,
@@ -698,7 +994,6 @@ function renderModal({
   saving: boolean;
   passwordMode: "manual" | "generate";
   setPasswordMode: (mode: "manual" | "generate") => void;
-  setModal: (modal: ModalState) => void;
   setTemporaryPassword: (password: string) => void;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
   submitFromForm: (event: FormEvent<HTMLFormElement>, action: string, map: (form: FormData) => Record<string, unknown>) => void;
@@ -732,6 +1027,7 @@ function renderModal({
     );
   }
   if (modal.type === "reservation") {
+    const progressById = new Map(data.territoryProgress.map((item) => [item.territory_id, item]));
     const unavailable = new Set([
       ...data.unavailableReservations
         .filter((item) => item.service_date === modal.date && item.territory_id !== modal.item?.territory_id)
@@ -745,30 +1041,28 @@ function renderModal({
       <FormModal title={modal.item ? "Editar reserva" : "Agregar territorios"} subtitle={`${modal.window.name} - ${displayDate(modal.date)}`} onSubmit={(event) => submitFromForm(event, modal.item ? "updateReservation" : "createReservation", (form) => ({ id: modal.item?.id, reservation_window_id: modal.window.id, service_date: modal.date, territory_id: form.get("territory_id"), territory_ids: form.getAll("territory_ids"), departure_location: form.get("departure_location") }))} saving={saving}>
         {modal.item ? (
           <Field label="Territorio">
-            <select className={inputClass} name="territory_id" defaultValue={modal.item.territory_id} required>
-              {data.territories.map((territory) => {
-                const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
-                const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
-                const disabled = territory.id !== modal.item?.territory_id && (unavailable.has(territory.id) || completed);
-                return <option disabled={disabled} key={territory.id} value={territory.id}>{territorySelectionLabel(territory, progress)}{unavailable.has(territory.id) ? " - No disponible" : ""}</option>;
-              })}
-            </select>
+            <TerritoryChoiceList
+              blockedIds={new Set([...unavailable].filter((id) => id !== modal.item?.territory_id))}
+              defaultValue={modal.item.territory_id}
+              name="territory_id"
+              progressById={progressById}
+              territories={data.territories}
+              type="radio"
+              allowValue={modal.item.territory_id}
+            />
           </Field>
         ) : (
           <fieldset>
-            <legend className="text-sm font-medium">Territorios</legend>
-            <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-300 p-2">
-              {data.territories.map((territory) => {
-                const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
-                const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
-                const disabled = unavailable.has(territory.id) || completed;
-                return (
-                  <label className={cn("flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm", disabled ? "cursor-not-allowed bg-slate-50 text-slate-400" : "cursor-pointer hover:bg-blue-50")} key={territory.id}>
-                    <input className="h-4 w-4 accent-blue-700" disabled={disabled} name="territory_ids" type="checkbox" value={territory.id} />
-                    <span>{territorySelectionLabel(territory, progress)}{unavailable.has(territory.id) ? " - No disponible" : ""}</span>
-                  </label>
-                );
-              })}
+            <legend className="text-sm font-medium text-slate-200">Territorios disponibles</legend>
+            <p className="mt-2 text-sm text-slate-400">Selecciona uno o varios territorios para esta fecha. Los ya ocupados o completados quedan bloqueados automáticamente.</p>
+            <div className="mt-3">
+              <TerritoryChoiceList
+                blockedIds={unavailable}
+                name="territory_ids"
+                progressById={progressById}
+                territories={data.territories}
+                type="checkbox"
+              />
             </div>
           </fieldset>
         )}
@@ -802,30 +1096,33 @@ function renderModal({
     );
   }
   if (modal.type === "adminReservation") {
+    const progressById = new Map(data.territoryProgress.map((item) => [item.territory_id, item]));
+    const blockedInWindow = new Set(
+      data.reservations
+        .filter((item) => item.reservation_window_id === modal.window.id && item.status === "ACTIVE")
+        .map((item) => item.territory_id),
+    );
+    const dates = [modal.window.saturday_date, modal.window.sunday_date].filter(Boolean) as string[];
     return (
-      <FormModal title="Reserva administrativa" subtitle={`${modal.window.name} - selecciona una fecha para continuar`} hideSubmit saving={saving} onSubmit={(event) => event.preventDefault()}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[
-            { label: "Sabado", date: modal.window.saturday_date },
-            { label: "Domingo", date: modal.window.sunday_date },
-          ]
-            .filter((item): item is { label: string; date: string } => Boolean(item.date))
-            .map((item) => (
-              <button
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-left text-sm text-slate-300 transition hover:-translate-y-0.5 hover:border-sky-400/25 hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-                key={item.label}
-                onClick={() => setModal({ type: "reservation", window: modal.window, date: item.date })}
-                type="button"
-              >
-                <p className="font-semibold text-white">{item.label}</p>
-                <p className="mt-1 text-slate-400">{displayDate(item.date)}</p>
-                <p className="mt-3 text-xs uppercase tracking-[0.14em] text-sky-300/80">Abrir seleccion</p>
-              </button>
-            ))}
+      <FormModal title="Bloquear territorios" subtitle={`${modal.window.name} · el bloqueo aplicará a toda la ventana`} saving={saving} onSubmit={(event) => submitFromForm(event, "createAdminReservations", (form) => ({ reservation_window_id: modal.window.id, territory_ids: form.getAll("territory_ids") }))}>
+        <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
+          <p className="text-sm font-medium text-white">Fechas cubiertas</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {dates.map((date) => <Badge className="border-white/10 bg-black/20 text-slate-300" key={date}>{displayDate(date)}</Badge>)}
+          </div>
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            Estos territorios quedarán bloqueados para que ningún anciano los agregue en esta ventana. No se pedirá lugar de salida ni selección por día.
+          </p>
         </div>
-        <p className="rounded-2xl border border-sky-400/15 bg-sky-500/10 px-4 py-3 text-sm leading-6 text-sky-100/90">
-          Elige el dia y pasaras directamente al selector de territorios con el nuevo estilo oscuro.
-        </p>
+        <Field label="Territorios a bloquear">
+          <TerritoryChoiceList
+            blockedIds={blockedInWindow}
+            name="territory_ids"
+            progressById={progressById}
+            territories={data.territories}
+            type="checkbox"
+          />
+        </Field>
       </FormModal>
     );
   }
@@ -999,22 +1296,22 @@ function TerritoryBlocksModal({
   );
 }
 
-const inputClass = "mt-1 min-h-11 w-full rounded-2xl border border-white/12 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] outline-none transition placeholder:text-slate-500 focus:border-sky-400/60 focus:bg-slate-950 focus:ring-4 focus:ring-sky-500/15 disabled:cursor-not-allowed disabled:bg-slate-900/80 disabled:text-slate-500";
-const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(14,165,233,0.28)] transition hover:-translate-y-0.5 hover:from-sky-400 hover:to-cyan-300 hover:shadow-[0_16px_36px_rgba(14,165,233,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
-const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(14,165,233,0.22)] transition hover:-translate-y-0.5 hover:from-sky-400 hover:to-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:-translate-y-0.5 hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
-const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
-const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/12 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-sky-400/60 focus:ring-4 focus:ring-sky-500/15 disabled:cursor-not-allowed disabled:bg-slate-900/70";
+const inputClass = "mt-1 min-h-11 w-full rounded-2xl border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
+const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/14 bg-white px-4 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60";
+const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/14 bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60";
+const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
+const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
+const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
 
 function tabClass(active: boolean) {
-  return cn("inline-flex min-h-10 shrink-0 cursor-pointer items-center gap-2 rounded-2xl px-3.5 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400", active ? "bg-gradient-to-r from-sky-500 to-cyan-400 text-slate-950 shadow-[0_8px_24px_rgba(14,165,233,0.28)]" : "bg-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white");
+  return cn("inline-flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30", active ? "border border-white/12 bg-white/[0.08] text-white" : "border border-transparent bg-transparent text-slate-400 hover:bg-white/[0.04] hover:text-white");
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: string } | null; onClose: () => void }) {
   if (!toast) return null;
-  return <div className={cn("modal-panel glass-panel fixed right-4 top-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3 text-sm", toast.type === "success" ? "border-emerald-400/25 text-emerald-100" : "border-rose-400/25 text-rose-100")} role="status"><CheckCircle2 size={18} /><span>{toast.text}</span><button className="ml-2 cursor-pointer rounded-full p-1 text-slate-400 transition hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Cerrar"><X size={16} /></button></div>;
+  return <div className={cn("modal-panel glass-panel fixed right-4 top-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3 text-sm", toast.type === "success" ? "border-emerald-400/20 text-emerald-100" : "border-rose-400/20 text-rose-100")} role="status"><CheckCircle2 size={18} /><span>{toast.text}</span><button className="ml-2 cursor-pointer rounded-full p-1 text-slate-400 transition hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Cerrar"><X size={16} /></button></div>;
 }
 function TemporaryPasswordModal({ password, onClose }: { password: string; onClose: () => void }) {
   useEffect(() => {
@@ -1027,10 +1324,10 @@ function AddButton({ children, onClick }: { children: React.ReactNode; onClick: 
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;
 }
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
-  return <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4"><span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300">{icon}</span><p className="mt-4 text-sm font-medium text-slate-300">{label}</p><p className="mt-1 text-3xl font-semibold text-white">{value}</p></article>;
+  return <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4"><span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white">{icon}</span><p className="mt-4 text-sm font-medium text-slate-400">{label}</p><p className="mt-1 text-3xl font-semibold text-white">{value}</p></article>;
 }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300">{icon}</span><h2 className="mt-4 text-lg font-semibold text-white">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-300">{text}</p></section>;
+  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white">{icon}</span><h2 className="mt-4 text-lg font-semibold text-white">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">{text}</p></section>;
 }
 function Panel({ title, description, action, children }: { title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
   return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-white">{title}</h2><p className="mt-1 text-sm text-slate-300">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
@@ -1048,14 +1345,14 @@ function Badge({ children, className }: { children: React.ReactNode; className: 
   return <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", className)}>{children}</span>;
 }
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-3 text-slate-200 transition hover:border-sky-400/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 text-slate-200 transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
 }
 function DeleteButton({ onClick, label = "Eliminar" }: { onClick: () => void; label?: string }) {
   return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
 }
 function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: () => void; children: React.ReactNode }) {
   if (!modal) return null;
-  return <div className="modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-slate-950/72 px-4 py-6 backdrop-blur-md"><div className={cn("modal-panel glass-panel w-full rounded-[1.75rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" onClick={onClose} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className="modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm"><div className={cn("modal-panel glass-panel w-full rounded-[1.75rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClose} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
 function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
   return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-300">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;

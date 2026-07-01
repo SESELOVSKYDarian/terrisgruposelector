@@ -24,7 +24,6 @@ const createReservationSchema = reservationBaseSchema.extend({
 
 const createAdminReservationSchema = z.object({
   reservation_window_id: z.string().uuid(),
-  service_date: z.string().date(),
   territory_ids: z.array(z.string().uuid()).min(1).max(20),
   admin_note: z.string().trim().max(240).optional(),
 });
@@ -66,6 +65,10 @@ function getServiceDay(serviceDate: string) {
   const date = new Date(`${serviceDate}T00:00:00Z`);
   const serviceDay = date.getUTCDay() === 6 ? "SATURDAY" : date.getUTCDay() === 0 ? "SUNDAY" : null;
   return serviceDay;
+}
+
+function getWindowServiceDates(windowData: { saturday_date: string | null; sunday_date: string | null }) {
+  return [windowData.saturday_date, windowData.sunday_date].filter(Boolean) as string[];
 }
 
 async function ensureTerritoriesCanBeReserved(territoryIds: string[]) {
@@ -351,7 +354,7 @@ export async function POST(request: Request) {
 
     if (action === "createAdminReservations") {
       const result = createAdminReservationSchema.safeParse(payload);
-      if (!result.success) return fail("Selecciona la ventana, fecha y al menos un territorio.", 422);
+      if (!result.success) return fail("Selecciona la ventana y al menos un territorio.", 422);
 
       const { data: windowData, error: windowError } = await supabase
         .from("reservation_windows")
@@ -359,12 +362,8 @@ export async function POST(request: Request) {
         .eq("id", result.data.reservation_window_id)
         .single();
       if (windowError || !windowData || !windowData.active) return fail("La ventana no esta disponible.", 404);
-      if (![windowData.saturday_date, windowData.sunday_date].includes(result.data.service_date)) {
-        return fail("La fecha no pertenece a esta ventana.", 422);
-      }
-
-      const serviceDay = getServiceDay(result.data.service_date);
-      if (!serviceDay) return fail("La fecha debe ser sabado o domingo.", 422);
+      const serviceDates = getWindowServiceDates(windowData);
+      if (!serviceDates.length) return fail("La ventana no tiene fechas habilitadas.", 422);
 
       const territoryIds = [...new Set(result.data.territory_ids)];
       try {
@@ -373,24 +372,27 @@ export async function POST(request: Request) {
         return fail(error instanceof Error ? error.message : "No se pudieron validar los territorios.", 409);
       }
 
-      const rows = territoryIds.map((territoryId) => ({
-        reservation_window_id: result.data.reservation_window_id,
-        territory_id: territoryId,
-        group_id: null,
-        responsible_user_id: profile.id,
-        service_date: result.data.service_date,
-        service_day: serviceDay,
-        departure_location: "Reservado por administracion",
-        reserved_by_admin: true,
-        admin_note: result.data.admin_note?.trim() || null,
-        created_by: profile.id,
+      const rows = territoryIds.flatMap((territoryId) => serviceDates.map((serviceDate) => {
+        const serviceDay = getServiceDay(serviceDate);
+        return {
+          reservation_window_id: result.data.reservation_window_id,
+          territory_id: territoryId,
+          group_id: null,
+          responsible_user_id: profile.id,
+          service_date: serviceDate,
+          service_day: serviceDay,
+          departure_location: "Bloqueado por administracion",
+          reserved_by_admin: true,
+          admin_note: result.data.admin_note?.trim() || null,
+          created_by: profile.id,
+        };
       }));
       const { data: reservations, error } = await supabase
         .from("territory_reservations")
         .insert(rows)
         .select("id");
       if (error || !reservations?.length) {
-        return fail(error?.code === "23505" ? "Uno de esos territorios ya esta reservado para esa fecha." : error?.message ?? "No se pudo reservar.", error?.code === "23505" ? 409 : 400);
+        return fail(error?.code === "23505" ? "Uno de esos territorios ya esta reservado o bloqueado dentro de esta ventana." : error?.message ?? "No se pudo bloquear.", error?.code === "23505" ? 409 : 400);
       }
       return ok();
     }
