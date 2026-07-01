@@ -68,7 +68,12 @@ create table if not exists public.reservation_windows (
 
 alter table public.territory_reservations
   add column if not exists reservation_window_id uuid references public.reservation_windows(id) on delete cascade,
-  add column if not exists departure_location text;
+  add column if not exists departure_location text,
+  add column if not exists reserved_by_admin boolean not null default false,
+  add column if not exists admin_note text;
+
+alter table public.territory_reservations
+  alter column group_id drop not null;
 
 drop index if exists public.one_active_group_reservation_per_window_date;
 

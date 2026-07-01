@@ -22,6 +22,13 @@ const createReservationSchema = reservationBaseSchema.extend({
   territory_ids: z.array(z.string().uuid()).min(1).max(20),
 });
 
+const createAdminReservationSchema = z.object({
+  reservation_window_id: z.string().uuid(),
+  service_date: z.string().date(),
+  territory_ids: z.array(z.string().uuid()).min(1).max(20),
+  admin_note: z.string().trim().max(240).optional(),
+});
+
 const updateReservationSchema = reservationBaseSchema.extend({
   territory_id: z.string().uuid(),
 });
@@ -49,10 +56,64 @@ function isPastDeadline(deadline: string) {
 }
 
 function migrationMessage(message: string) {
-  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id"];
+  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id", "reserved_by_admin", "admin_note"];
   return fields.some((field) => message.includes(field))
     ? `${message} Ejecuta supabase/custom-auth-migration.sql en Supabase y vuelve a intentar.`
     : message;
+}
+
+function getServiceDay(serviceDate: string) {
+  const date = new Date(`${serviceDate}T00:00:00Z`);
+  const serviceDay = date.getUTCDay() === 6 ? "SATURDAY" : date.getUTCDay() === 0 ? "SUNDAY" : null;
+  return serviceDay;
+}
+
+async function ensureTerritoriesCanBeReserved(territoryIds: string[]) {
+  const supabase = createAdminSupabaseClient();
+  const { data: territories, error: territoriesError } = await supabase
+    .from("territories")
+    .select("id")
+    .in("id", territoryIds)
+    .eq("active", true);
+  if (territoriesError) throw new Error(territoriesError.message);
+  if ((territories ?? []).length !== territoryIds.length) {
+    throw new Error("Uno de los territorios seleccionados no esta activo.");
+  }
+
+  const { data: activeRound } = await supabase
+    .from("annual_rounds")
+    .select("id")
+    .eq("status", "OPEN")
+    .order("year", { ascending: false })
+    .order("opened_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!activeRound) return;
+
+  const { data: territoryBlocks, error: blockError } = await supabase
+    .from("blocks")
+    .select("id, territory_id")
+    .in("territory_id", territoryIds)
+    .eq("active", true);
+  if (blockError) throw new Error(blockError.message);
+  const blockIds = (territoryBlocks ?? []).map((block) => block.id);
+  const { data: completedStatuses, error: statusError } = blockIds.length
+    ? await supabase
+        .from("block_round_statuses")
+        .select("block_id")
+        .eq("annual_round_id", activeRound.id)
+        .eq("status", "COMPLETED")
+        .in("block_id", blockIds)
+    : { data: [], error: null };
+  if (statusError) throw new Error(statusError.message);
+  const completedIds = new Set((completedStatuses ?? []).map((status) => status.block_id));
+  const completedTerritory = territoryIds.find((territoryId) => {
+    const matchingBlocks = (territoryBlocks ?? []).filter((block) => block.territory_id === territoryId);
+    return matchingBlocks.length > 0 && matchingBlocks.every((block) => completedIds.has(block.id));
+  });
+  if (completedTerritory) {
+    throw new Error("Uno de los territorios seleccionados ya tiene todas sus manzanas completadas.");
+  }
 }
 
 async function getReservationForChange(
@@ -224,44 +285,16 @@ export async function POST(request: Request) {
         return fail("La fecha no pertenece a esta ventana.", 422);
       }
 
-      const date = new Date(`${result.data.service_date}T00:00:00Z`);
-      const serviceDay = date.getUTCDay() === 6 ? "SATURDAY" : date.getUTCDay() === 0 ? "SUNDAY" : null;
+      const serviceDay = getServiceDay(result.data.service_date);
       if (!serviceDay) return fail("La fecha debe ser sabado o domingo.", 422);
 
       const territoryIds = "territory_ids" in result.data
         ? [...new Set(result.data.territory_ids)]
         : [result.data.territory_id];
-      const { data: activeRound } = await supabase
-        .from("annual_rounds")
-        .select("id")
-        .eq("status", "OPEN")
-        .order("year", { ascending: false })
-        .order("opened_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (activeRound) {
-        const { data: territoryBlocks, error: blockError } = await supabase
-          .from("blocks")
-          .select("id, territory_id")
-          .in("territory_id", territoryIds)
-          .eq("active", true);
-        if (blockError) return fail(blockError.message);
-        const blockIds = (territoryBlocks ?? []).map((block) => block.id);
-        const { data: completedStatuses, error: statusError } = blockIds.length
-          ? await supabase
-              .from("block_round_statuses")
-              .select("block_id")
-              .eq("annual_round_id", activeRound.id)
-              .eq("status", "COMPLETED")
-              .in("block_id", blockIds)
-          : { data: [], error: null };
-        if (statusError) return fail(statusError.message);
-        const completedIds = new Set((completedStatuses ?? []).map((status) => status.block_id));
-        const completedTerritory = territoryIds.find((territoryId) => {
-          const matchingBlocks = (territoryBlocks ?? []).filter((block) => block.territory_id === territoryId);
-          return matchingBlocks.length > 0 && matchingBlocks.every((block) => completedIds.has(block.id));
-        });
-        if (completedTerritory) return fail("Uno de los territorios seleccionados ya tiene todas sus manzanas completadas.", 409);
+      try {
+        await ensureTerritoriesCanBeReserved(territoryIds);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : "No se pudieron validar los territorios.", 409);
       }
 
       if (action === "updateReservation") {
@@ -315,6 +348,52 @@ export async function POST(request: Request) {
     }
 
     assertAdmin(profile);
+
+    if (action === "createAdminReservations") {
+      const result = createAdminReservationSchema.safeParse(payload);
+      if (!result.success) return fail("Selecciona la ventana, fecha y al menos un territorio.", 422);
+
+      const { data: windowData, error: windowError } = await supabase
+        .from("reservation_windows")
+        .select("*")
+        .eq("id", result.data.reservation_window_id)
+        .single();
+      if (windowError || !windowData || !windowData.active) return fail("La ventana no esta disponible.", 404);
+      if (![windowData.saturday_date, windowData.sunday_date].includes(result.data.service_date)) {
+        return fail("La fecha no pertenece a esta ventana.", 422);
+      }
+
+      const serviceDay = getServiceDay(result.data.service_date);
+      if (!serviceDay) return fail("La fecha debe ser sabado o domingo.", 422);
+
+      const territoryIds = [...new Set(result.data.territory_ids)];
+      try {
+        await ensureTerritoriesCanBeReserved(territoryIds);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : "No se pudieron validar los territorios.", 409);
+      }
+
+      const rows = territoryIds.map((territoryId) => ({
+        reservation_window_id: result.data.reservation_window_id,
+        territory_id: territoryId,
+        group_id: null,
+        responsible_user_id: profile.id,
+        service_date: result.data.service_date,
+        service_day: serviceDay,
+        departure_location: "Reservado por administracion",
+        reserved_by_admin: true,
+        admin_note: result.data.admin_note?.trim() || null,
+        created_by: profile.id,
+      }));
+      const { data: reservations, error } = await supabase
+        .from("territory_reservations")
+        .insert(rows)
+        .select("id");
+      if (error || !reservations?.length) {
+        return fail(error?.code === "23505" ? "Uno de esos territorios ya esta reservado para esa fecha." : error?.message ?? "No se pudo reservar.", error?.code === "23505" ? 409 : 400);
+      }
+      return ok();
+    }
 
     if (action === "createWindow" || action === "updateWindow") {
       const result = windowSchema.safeParse(payload);

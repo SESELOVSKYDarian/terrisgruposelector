@@ -60,12 +60,14 @@ type Reservation = {
   id: string;
   reservation_window_id: string;
   territory_id: string;
-  group_id: string;
+  group_id: string | null;
   responsible_user_id: string;
   service_date: string;
   service_day: ServiceDay;
   departure_location: string;
   status: ReservationStatus;
+  reserved_by_admin: boolean;
+  admin_note: string | null;
   territories?: Pick<Territory, "number" | "name"> | null;
   groups?: Pick<Group, "name"> | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
@@ -107,6 +109,7 @@ type ModalState =
   | { type: "block"; item?: Block }
   | { type: "round"; item?: Round }
   | { type: "window"; item?: ReservationWindow }
+  | { type: "adminReservation"; window: ReservationWindow }
   | { type: "reservation"; window: ReservationWindow; date: string; item?: Reservation }
   | { type: "user"; item?: Profile }
   | { type: "password"; item: Profile }
@@ -509,7 +512,8 @@ function AdminView({
       <Panel title="Ventanas de reserva" description="Publica las fechas y define hasta cuando los ancianos pueden responder." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
         <DataTable headers={["Ventana", "Fechas", "Limite", "Respuestas", "Estado", "Acciones"]}>
           {data.reservationWindows.map((window) => {
-            const windowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE");
+            const elderWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && !item.reserved_by_admin);
+            const adminWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && item.reserved_by_admin);
             const expectedDates = [window.saturday_date, window.sunday_date].filter(Boolean).length;
             const expectedReservations = elderGroupIds.size * expectedDates;
             const expired = new Date(window.booking_deadline).getTime() < loadedAt;
@@ -518,9 +522,13 @@ function AdminView({
                 <Cell><strong>{window.name}</strong></Cell>
                 <Cell>{[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" - ")}</Cell>
                 <Cell>{displayDateTime(window.booking_deadline)}</Cell>
-                <Cell><strong>{windowReservations.length}/{expectedReservations}</strong> reservas</Cell>
+                <Cell>
+                  <strong>{elderWindowReservations.length}/{expectedReservations}</strong> reservas
+                  {adminWindowReservations.length ? <span className="mt-1 block text-xs text-slate-500">{adminWindowReservations.length} admin</span> : null}
+                </Cell>
                 <Cell><Badge className={!window.active || expired ? "border-slate-200 bg-slate-100 text-slate-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>{!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}</Badge></Cell>
                 <Actions>
+                  <IconButton label="Reservar territorios" onClick={() => setModal({ type: "adminReservation", window })}><CalendarDays size={16} /></IconButton>
                   <IconButton label="Editar" onClick={() => setModal({ type: "window", item: window })}><Edit3 size={16} /></IconButton>
                   <DeleteButton onClick={() => void mutate("deleteWindow", { id: window.id })} />
                 </Actions>
@@ -535,15 +543,18 @@ function AdminView({
   if (activeView === "reservations") {
     return (
       <Panel title="Reservas recibidas" description="Todas las respuestas enviadas por los ancianos para las ventanas publicadas.">
-        <DataTable headers={["Ventana", "Fecha", "Territorio", "Grupo", "Responsable", "Lugar de salida", "Estado", "Acciones"]}>
+        <DataTable headers={["Ventana", "Fecha", "Territorio", "Origen", "Responsable", "Lugar de salida", "Estado", "Acciones"]}>
           {data.reservations.map((reservation) => (
             <tr key={reservation.id}>
               <Cell>{reservation.reservation_windows?.name ?? "-"}</Cell>
               <Cell>{displayDate(reservation.service_date)}<span className="mt-1 block text-xs text-slate-500">{serviceDayLabels[reservation.service_day]}</span></Cell>
               <Cell><strong>#{reservation.territories?.number}</strong></Cell>
-              <Cell>{reservation.groups?.name ?? "-"}</Cell>
+              <Cell>{reservation.reserved_by_admin ? <Badge className="border-amber-200 bg-amber-50 text-amber-700">Admin</Badge> : reservation.groups?.name ?? "-"}</Cell>
               <Cell>{reservation.profiles?.full_name ?? "-"}</Cell>
-              <Cell>{reservation.departure_location}</Cell>
+              <Cell>
+                {reservation.departure_location}
+                {reservation.reserved_by_admin && reservation.admin_note ? <span className="mt-1 block max-w-56 break-words text-xs text-slate-500">{reservation.admin_note}</span> : null}
+              </Cell>
               <Cell><Badge className={reservationStyles[reservation.status]}>{reservationStatusLabels[reservation.status]}</Badge></Cell>
               <Actions>
                 <select
