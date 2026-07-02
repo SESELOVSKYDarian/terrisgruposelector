@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell,
   CalendarClock,
@@ -18,8 +18,10 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  Save,
   ShieldCheck,
   Trash2,
+  TriangleAlert,
   Users,
   Wand2,
   X,
@@ -125,6 +127,15 @@ type ModalState =
   | { type: "user"; item?: Profile }
   | { type: "password"; item: Profile }
   | null;
+type ConfirmationState = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  tone: "danger" | "primary";
+} | null;
+type PendingConfirmation = NonNullable<ConfirmationState> & {
+  resolve: (confirmed: boolean) => void;
+};
 
 const emptyProfile: Profile = {
   id: "",
@@ -205,6 +216,7 @@ export default function Home() {
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [passwordMode, setPasswordMode] = useState<"manual" | "generate">("generate");
   const [loadedAt, setLoadedAt] = useState(0);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const isAdmin = profile?.role === "ADMIN";
   const openRound = data.rounds.find((round) => round.status === "OPEN");
@@ -263,7 +275,29 @@ export default function Home() {
     setData(emptyData);
   }
 
+  function requestConfirmation(action: string) {
+    if (action === "markNotificationRead") return Promise.resolve(true);
+    const deleting = action.startsWith("delete");
+    return new Promise<boolean>((resolve) => {
+      setPendingConfirmation({
+        title: deleting ? "¿Eliminar definitivamente?" : "¿Guardar estos cambios?",
+        description: deleting
+          ? "Esta acción no se puede deshacer. Revisa que sea el registro correcto antes de continuar."
+          : "Confirma que la información es correcta antes de aplicarla.",
+        confirmLabel: deleting ? "Sí, eliminar" : "Sí, guardar",
+        tone: deleting ? "danger" : "primary",
+        resolve,
+      });
+    });
+  }
+
+  function resolveConfirmation(confirmed: boolean) {
+    pendingConfirmation?.resolve(confirmed);
+    setPendingConfirmation(null);
+  }
+
   async function mutate(action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) {
+    if (!(await requestConfirmation(action))) return null;
     setSaving(true);
     try {
       const result = await requestJson("/api/app-data", {
@@ -320,44 +354,34 @@ export default function Home() {
 
   return (
     <main className="relative z-10 min-h-screen text-slate-100">
+      <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {isAdmin ? (
-          <div className="grid gap-5 xl:grid-cols-[272px_minmax(0,1fr)]">
+          <div className="grid items-start gap-4 lg:grid-cols-[236px_minmax(0,1fr)]">
             <AdminNav
               activeView={activeView}
               currentUser={profile}
-              data={data}
               unreadCount={unreadCount}
               onChange={setActiveView}
               onLogout={logout}
-              onRefresh={() => void loadData()}
             />
-            <div className="space-y-5">
-              <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Panel administrativo</p>
-                  <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                    Gestion de territorios y reservas
-                  </h1>
-                  <p className="mt-2 max-w-3xl text-sm text-slate-400">
-                    Controla ventanas, bloqueos administrativos, progreso por territorio y el estado general de cada vuelta.
-                  </p>
-                </div>
-                <div className="glass-panel-soft rounded-2xl px-4 py-3 text-sm text-slate-300">
-                  <p className="font-medium text-white">{profile.full_name}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">Super admin</p>
-                </div>
-              </header>
-
-              <AdminView
+            <div className="min-w-0 space-y-3">
+              <AdminTopbar
                 activeView={activeView}
-                data={data}
-                loadedAt={loadedAt}
-                openRound={openRound}
-                setModal={setModal}
-                mutate={mutate}
+                unreadCount={unreadCount}
+                onNotifications={() => setActiveView("notifications")}
               />
+              <div className="view-transition min-w-0" key={activeView}>
+                <AdminView
+                  activeView={activeView}
+                  data={data}
+                  loadedAt={loadedAt}
+                  openRound={openRound}
+                  setModal={setModal}
+                  mutate={mutate}
+                />
+              </div>
             </div>
           </div>
         ) : (
@@ -397,6 +421,11 @@ export default function Home() {
         }) : null}
       </ModalShell>
       <TemporaryPasswordModal password={temporaryPassword} onClose={() => setTemporaryPassword("")} />
+      <ConfirmationModal
+        confirmation={pendingConfirmation}
+        onCancel={() => resolveConfirmation(false)}
+        onConfirm={() => resolveConfirmation(true)}
+      />
     </main>
   );
 }
@@ -404,69 +433,112 @@ export default function Home() {
 function AdminNav({
   activeView,
   currentUser,
-  data,
   unreadCount,
   onChange,
   onLogout,
-  onRefresh,
 }: {
   activeView: string;
   currentUser: Profile;
-  data: AppData;
   unreadCount: number;
   onChange: (view: string) => void;
   onLogout: () => void;
-  onRefresh: () => void;
 }) {
   const tabs: Array<{ id: string; label: string; icon: ReactNode }> = [
     { id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> },
     { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
     { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
+    { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
     { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
     { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
     { id: "notifications", label: `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, icon: <Bell size={17} /> },
     { id: "groups", label: "Grupos", icon: <Users size={17} /> },
     { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
   ];
-  return (
-    <aside className="glass-panel sticky top-5 flex h-fit flex-col gap-5 rounded-[1.75rem] p-4" aria-label="Administracion">
-      <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Terris Grupo Selector</p>
-        <p className="mt-3 text-lg font-semibold text-white">Panel principal</p>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          Navega rápido entre ventanas, bloqueos, progreso y usuarios sin perder contexto.
-        </p>
-      </div>
+  const initials = currentUser.full_name
+    .split(" ")
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 
-      <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
-        <p className="text-sm font-medium text-white">{currentUser.full_name}</p>
-        <p className="mt-1 text-sm text-slate-400">@{currentUser.username}</p>
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-          <SidebarMiniStat label="Ventanas" value={data.reservationWindows.filter((item) => item.active).length} />
-          <SidebarMiniStat label="Activas" value={data.reservations.filter((item) => item.status === "ACTIVE").length} />
-          <SidebarMiniStat label="Avisos" value={unreadCount} />
-          <SidebarMiniStat label="Vueltas" value={data.rounds.length} />
+  return (
+    <aside className="glass-panel flex h-fit min-w-0 flex-col gap-3 rounded-[1.5rem] p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[620px]" aria-label="Administracion">
+      <div className="flex items-center gap-3 px-2 py-2">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white text-black">
+          <ShieldCheck size={19} aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-white">Terris</p>
+          <p className="truncate text-xs text-slate-500">Administración</p>
         </div>
       </div>
 
-      <nav className="space-y-1" aria-label="Secciones">
+      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0" aria-label="Secciones">
         {tabs.map(({ id, label, icon }) => (
-          <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button">
-            {icon}
-            {label}
+          <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
+            <span className="shrink-0">{icon}</span>
+            <span className="whitespace-nowrap">{label}</span>
           </button>
         ))}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-2">
-        <button className={secondaryButtonClass} onClick={onRefresh} type="button">
-          <RefreshCw size={17} />Actualizar
-        </button>
-        <button className={secondaryButtonClass} onClick={onLogout} type="button">
-          <LogOut size={17} />Salir
+      <div className="mt-auto flex items-center gap-2 rounded-[1.25rem] border border-white/8 bg-white/[0.025] p-2">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] text-xs font-bold text-white">
+          {initials}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
+          <p className="truncate text-xs text-slate-500">@{currentUser.username} · Super admin</p>
+        </div>
+        <button className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onLogout} type="button" aria-label="Cerrar sesión" title="Cerrar sesión">
+          <LogOut size={17} aria-hidden="true" />
         </button>
       </div>
     </aside>
+  );
+}
+
+function AdminTopbar({
+  activeView,
+  unreadCount,
+  onNotifications,
+}: {
+  activeView: string;
+  unreadCount: number;
+  onNotifications: () => void;
+}) {
+  const sectionLabels: Record<string, string> = {
+    dashboard: "Resumen",
+    windows: "Ventanas",
+    reservations: "Reservas",
+    blocks: "Bloqueos",
+    notifications: "Avisos",
+    territories: "Territorios",
+    rounds: "Vueltas",
+    groups: "Grupos",
+    users: "Usuarios",
+  };
+  return (
+    <header className="glass-panel flex min-h-16 items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
+      <button
+        className={cn(
+          "relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          activeView === "notifications"
+            ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
+            : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+        )}
+        onClick={onNotifications}
+        type="button"
+        aria-label={unreadCount ? `Avisos, ${unreadCount} sin leer` : "Avisos"}
+      >
+        <Bell size={18} aria-hidden="true" />
+        {unreadCount ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}
+      </button>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Panel administrativo</p>
+        <h1 className="truncate text-base font-semibold text-white sm:text-lg">{sectionLabels[activeView] ?? "Administración"}</h1>
+      </div>
+    </header>
   );
 }
 
@@ -613,39 +685,11 @@ function AdminView({
   }
 
   if (activeView === "reservations") {
-    return (
-      <Panel title="Reservas y bloqueos" description="Historial operativo de respuestas de ancianos y bloqueos administrativos dentro de cada ventana.">
-        <DataTable headers={["Ventana", "Fecha", "Territorio", "Origen", "Responsable", "Lugar de salida", "Estado", "Acciones"]}>
-          {data.reservations.map((reservation) => (
-            <tr key={reservation.id}>
-              <Cell>{reservation.reservation_windows?.name ?? "-"}</Cell>
-              <Cell>{displayDate(reservation.service_date)}<span className="mt-1 block text-xs text-slate-500">{serviceDayLabels[reservation.service_day]}</span></Cell>
-              <Cell><strong>#{reservation.territories?.number}</strong></Cell>
-              <Cell>{reservation.reserved_by_admin ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Bloqueo</Badge> : reservation.groups?.name ?? "-"}</Cell>
-              <Cell>{reservation.profiles?.full_name ?? "-"}</Cell>
-              <Cell>
-                {reservation.reserved_by_admin ? "Bloqueado por administracion" : reservation.departure_location}
-                {reservation.reserved_by_admin && reservation.admin_note ? <span className="mt-1 block max-w-56 break-words text-xs text-slate-500">{reservation.admin_note}</span> : null}
-              </Cell>
-              <Cell><Badge className={reservationStyles[reservation.status]}>{reservationStatusLabels[reservation.status]}</Badge></Cell>
-              <Actions>
-                <select
-                  aria-label={`Estado de territorio ${reservation.territories?.number}`}
-                  className={compactSelectClass}
-                  value={reservation.status}
-                  onChange={(event) => void mutate("updateReservationStatus", { id: reservation.id, status: event.target.value })}
-                >
-                  {(["ACTIVE", "COMPLETED", "CANCELLED", "EXPIRED"] as ReservationStatus[]).map((status) => (
-                    <option key={status} value={status}>{reservationStatusLabels[status]}</option>
-                  ))}
-                </select>
-                <DeleteButton onClick={() => void mutate("deleteReservation", { id: reservation.id })} />
-              </Actions>
-            </tr>
-          ))}
-        </DataTable>
-      </Panel>
-    );
+    return <ReservationCollection data={data} blocked={false} setModal={setModal} mutate={mutate} />;
+  }
+
+  if (activeView === "blocks") {
+    return <ReservationCollection data={data} blocked setModal={setModal} mutate={mutate} />;
   }
 
   if (activeView === "notifications") {
@@ -753,6 +797,118 @@ function AdminView({
   );
 }
 
+function ReservationCollection({
+  data,
+  blocked,
+  setModal,
+  mutate,
+}: {
+  data: AppData;
+  blocked: boolean;
+  setModal: (modal: ModalState) => void;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const relevantReservations = data.reservations.filter((reservation) => reservation.reserved_by_admin === blocked);
+  const windows = [...data.reservationWindows]
+    .filter((window) => relevantReservations.some((reservation) => reservation.reservation_window_id === window.id))
+    .sort((a, b) => new Date(b.booking_deadline).getTime() - new Date(a.booking_deadline).getTime());
+
+  if (!windows.length) {
+    return (
+      <EmptyState
+        icon={blocked ? <ShieldCheck size={24} /> : <CalendarClock size={24} />}
+        title={blocked ? "No hay bloqueos registrados" : "No hay reservas registradas"}
+        text={blocked ? "Los territorios bloqueados administrativamente aparecerán agrupados por ventana." : "Las respuestas de los grupos aparecerán aquí, organizadas por ventana."}
+      />
+    );
+  }
+
+  return (
+    <section className="space-y-4" aria-label={blocked ? "Bloqueos por ventana" : "Reservas por ventana"}>
+      <div className="px-1">
+        <h2 className="text-xl font-semibold tracking-tight text-white">{blocked ? "Bloqueos administrativos" : "Reservas de los grupos"}</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          {blocked ? "Separados de las respuestas para revisar rápidamente qué territorios no están disponibles." : "Organizadas por ventana para leer el estado operativo sin recorrer una tabla extensa."}
+        </p>
+      </div>
+
+      {windows.map((window) => {
+        const windowReservations = relevantReservations
+          .filter((reservation) => reservation.reservation_window_id === window.id)
+          .sort((a, b) => a.service_date.localeCompare(b.service_date) || Number(a.territories?.number ?? 0) - Number(b.territories?.number ?? 0));
+        return (
+          <article className="glass-panel overflow-hidden rounded-[1.5rem]" key={window.id}>
+            <div className="flex flex-col gap-3 border-b border-white/8 bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-white">{window.name}</h3>
+                  <Badge className="border-white/10 bg-white/[0.05] text-slate-300">{windowReservations.length} {windowReservations.length === 1 ? "registro" : "registros"}</Badge>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" · ") || "Sin fechas"}
+                </p>
+              </div>
+              {blocked ? <button className={miniButtonClass} onClick={() => setModal({ type: "adminReservation", window })} type="button"><Plus size={15} />Agregar bloqueo</button> : null}
+            </div>
+
+            <div className="grid gap-3 p-3 sm:p-4 xl:grid-cols-2 2xl:grid-cols-3">
+              {windowReservations.map((reservation) => {
+                const territory = data.territories.find((item) => item.id === reservation.territory_id);
+                return (
+                  <article className={cn("group flex min-h-56 flex-col rounded-[1.25rem] border p-4 transition-colors duration-200", blocked ? "border-amber-400/15 bg-amber-500/[0.055] hover:border-amber-400/25" : "border-white/8 bg-white/[0.025] hover:border-white/14")} key={reservation.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">{serviceDayLabels[reservation.service_day]} · {displayDate(reservation.service_date)}</p>
+                        <h4 className="mt-1 text-lg font-semibold text-white">Territorio #{reservation.territories?.number ?? territory?.number}</h4>
+                      </div>
+                      <Badge className={reservationStyles[reservation.status]}>{reservationStatusLabels[reservation.status]}</Badge>
+                    </div>
+
+                    <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      {blocked ? (
+                        <>
+                          <div><dt className="text-xs text-slate-500">Tipo</dt><dd className="mt-1 text-slate-200">Bloqueo admin</dd></div>
+                          <div><dt className="text-xs text-slate-500">Responsable</dt><dd className="mt-1 truncate text-slate-200">{reservation.profiles?.full_name ?? "Administración"}</dd></div>
+                          {reservation.admin_note ? <div className="col-span-2"><dt className="text-xs text-slate-500">Nota</dt><dd className="mt-1 break-words text-slate-300">{reservation.admin_note}</dd></div> : null}
+                        </>
+                      ) : (
+                        <>
+                          <div><dt className="text-xs text-slate-500">Grupo</dt><dd className="mt-1 truncate text-slate-200">{reservation.groups?.name ?? "Sin grupo"}</dd></div>
+                          <div><dt className="text-xs text-slate-500">Responsable</dt><dd className="mt-1 truncate text-slate-200">{reservation.profiles?.full_name ?? "-"}</dd></div>
+                          <div className="col-span-2"><dt className="text-xs text-slate-500">Lugar de salida</dt><dd className="mt-1 break-words text-slate-300">{reservation.departure_location}</dd></div>
+                        </>
+                      )}
+                    </dl>
+
+                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-white/8 pt-4">
+                      <select
+                        aria-label={`Estado del territorio ${reservation.territories?.number ?? territory?.number}`}
+                        className={compactSelectClass + " mr-auto"}
+                        value={reservation.status}
+                        onChange={(event) => void mutate("updateReservationStatus", { id: reservation.id, status: event.target.value })}
+                      >
+                        {(["ACTIVE", "COMPLETED", "CANCELLED", "EXPIRED"] as ReservationStatus[]).map((status) => (
+                          <option key={status} value={status}>{reservationStatusLabels[status]}</option>
+                        ))}
+                      </select>
+                      {!blocked && territory ? (
+                        <IconButton label={`Marcar manzanas del territorio ${territory.number}`} onClick={() => setModal({ type: "territoryBlocks", territory })}>
+                          <Grid3X3 size={16} />
+                        </IconButton>
+                      ) : null}
+                      <DeleteButton onClick={() => void mutate("deleteReservation", { id: reservation.id })} />
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
 function getTerritoryCompletionHistory(data: AppData) {
   const blockTotals = new Map<string, number>();
   for (const block of data.blocks) {
@@ -799,15 +955,6 @@ function getTerritoryCompletionHistory(data: AppData) {
     }));
 }
 
-function SidebarMiniStat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
-    </div>
-  );
-}
-
 function AdminDashboard({
   data,
   loadedAt,
@@ -823,6 +970,11 @@ function AdminDashboard({
   const blockedReservations = data.reservations.filter((item) => item.reserved_by_admin && item.status === "ACTIVE");
   const answeredReservations = data.reservations.filter((item) => !item.reserved_by_admin && item.status === "ACTIVE");
   const completedTerritories = data.territoryProgress.filter((item) => item.total_blocks > 0 && item.completed_blocks === item.total_blocks).length;
+  const territoriesWithBlocks = data.territoryProgress.filter((item) => item.total_blocks > 0).length;
+  const territoriesInProgress = data.territoryProgress.filter((item) => item.completed_blocks > 0 && item.completed_blocks < item.total_blocks).length;
+  const completionRate = territoriesWithBlocks ? Math.round((completedTerritories / territoriesWithBlocks) * 100) : 0;
+  const respondingGroups = new Set(answeredReservations.map((item) => item.group_id).filter(Boolean)).size;
+  const unreadNotifications = data.notifications.filter((item) => !item.read_at).length;
   const completionHistory = getTerritoryCompletionHistory(data).slice(0, 6);
   const windowsHistory = [...data.reservationWindows]
     .sort((a, b) => new Date(b.booking_deadline).getTime() - new Date(a.booking_deadline).getTime())
@@ -831,10 +983,35 @@ function AdminDashboard({
   return (
     <div className="space-y-5">
       <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-        <Metric icon={<MapIcon size={20} />} label="Territorios activos" value={data.territories.length} />
-        <Metric icon={<CalendarDays size={20} />} label="Respuestas activas" value={answeredReservations.length} />
-        <Metric icon={<ShieldCheck size={20} />} label="Bloqueos vigentes" value={blockedReservations.length} />
-        <Metric icon={<Bell size={20} />} label="Avisos pendientes" value={data.notifications.filter((item) => !item.read_at).length} />
+        <Metric
+          icon={<MapIcon size={20} />}
+          label="Avance de la vuelta"
+          value={`${completionRate}%`}
+          detail={`${completedTerritories} completos · ${territoriesInProgress} en curso`}
+          progress={completionRate}
+          tone="sky"
+        />
+        <Metric
+          icon={<CalendarDays size={20} />}
+          label="Reservas activas"
+          value={answeredReservations.length}
+          detail={`${respondingGroups} ${respondingGroups === 1 ? "grupo respondió" : "grupos respondieron"}`}
+          tone="emerald"
+        />
+        <Metric
+          icon={<ShieldCheck size={20} />}
+          label="Bloqueos vigentes"
+          value={blockedReservations.length}
+          detail={`${activeWindows.length} ${activeWindows.length === 1 ? "ventana activa" : "ventanas activas"}`}
+          tone="amber"
+        />
+        <Metric
+          icon={<Bell size={20} />}
+          label="Avisos pendientes"
+          value={unreadNotifications}
+          detail={unreadNotifications ? "Requieren revisión" : "Todo está al día"}
+          tone="rose"
+        />
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.25fr_0.95fr]">
@@ -1300,27 +1477,145 @@ const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 r
 const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
 
 function tabClass(active: boolean) {
-  return cn("inline-flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30", active ? "border border-white/12 bg-white/[0.08] text-white" : "border border-transparent bg-transparent text-slate-400 hover:bg-white/[0.04] hover:text-white");
+  return cn("inline-flex min-h-11 w-auto shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 lg:w-full", active ? "border-white/12 bg-white/[0.09] text-white" : "border-transparent bg-transparent text-slate-400 hover:bg-white/[0.045] hover:text-white");
+}
+function SmoothCursor() {
+  const cursorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!window.matchMedia("(pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let frame = 0;
+    let currentX = -100;
+    let currentY = -100;
+    let targetX = -100;
+    let targetY = -100;
+
+    const move = (event: PointerEvent) => {
+      targetX = event.clientX;
+      targetY = event.clientY;
+      cursorRef.current?.classList.add("is-visible");
+    };
+    const hide = () => cursorRef.current?.classList.remove("is-visible");
+    const animate = () => {
+      currentX += (targetX - currentX) * 0.18;
+      currentY += (targetY - currentY) * 0.18;
+      if (cursorRef.current) cursorRef.current.style.transform = `translate3d(${currentX}px, ${currentY}px, 0) translate(-50%, -50%)`;
+      frame = window.requestAnimationFrame(animate);
+    };
+
+    window.addEventListener("pointermove", move, { passive: true });
+    document.documentElement.addEventListener("mouseleave", hide);
+    frame = window.requestAnimationFrame(animate);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      document.documentElement.removeEventListener("mouseleave", hide);
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return <div className="smooth-cursor" ref={cursorRef} aria-hidden="true" />;
 }
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: string } | null; onClose: () => void }) {
   if (!toast) return null;
-  return <div className={cn("modal-panel glass-panel fixed right-4 top-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3 text-sm", toast.type === "success" ? "border-emerald-400/20 text-emerald-100" : "border-rose-400/20 text-rose-100")} role="status"><CheckCircle2 size={18} /><span>{toast.text}</span><button className="ml-2 cursor-pointer rounded-full p-1 text-slate-400 transition hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Cerrar"><X size={16} /></button></div>;
+  const success = toast.type === "success";
+  return (
+    <div className={cn("toast-card glass-panel fixed bottom-4 left-4 z-[80] flex max-w-[calc(100vw-2rem)] items-start gap-3 overflow-hidden rounded-[1.25rem] border px-3.5 py-3.5 pr-11 shadow-2xl sm:left-auto sm:right-4 sm:w-[360px]", success ? "border-emerald-400/25" : "border-rose-400/25")} role={success ? "status" : "alert"}>
+      <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border", success ? "border-emerald-400/20 bg-emerald-500/12 text-emerald-300" : "border-rose-400/20 bg-rose-500/12 text-rose-300")}>
+        {success ? <CheckCircle2 size={19} aria-hidden="true" /> : <TriangleAlert size={19} aria-hidden="true" />}
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <p className="text-sm font-semibold text-white">{success ? "Cambios aplicados" : "No se pudo completar"}</p>
+        <p className="mt-1 text-sm leading-5 text-slate-400">{toast.text}</p>
+      </div>
+      <button className="absolute right-2.5 top-2.5 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClose} type="button" aria-label="Cerrar aviso"><X size={15} /></button>
+      <span className={cn("toast-progress absolute inset-x-0 bottom-0 h-0.5 origin-left", success ? "bg-emerald-400" : "bg-rose-400")} aria-hidden="true" />
+    </div>
+  );
+}
+function ConfirmationModal({
+  confirmation,
+  onCancel,
+  onConfirm,
+}: {
+  confirmation: ConfirmationState;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!confirmation) return null;
+  const destructive = confirmation.tone === "danger";
+  return (
+    <div className="modal-overlay fixed inset-0 z-[70] grid place-items-center bg-black/80 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className={cn("modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border", destructive ? "border-rose-400/25" : "border-sky-400/20")} role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-description">
+        <div className="p-5 sm:p-6">
+          <span className={cn("inline-flex h-12 w-12 items-center justify-center rounded-2xl border", destructive ? "border-rose-400/20 bg-rose-500/12 text-rose-300" : "border-sky-400/20 bg-sky-500/12 text-sky-300")}>
+            {destructive ? <TriangleAlert size={22} aria-hidden="true" /> : <Save size={22} aria-hidden="true" />}
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-white" id="confirmation-title">{confirmation.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400" id="confirmation-description">{confirmation.description}</p>
+          <div className="mt-6 grid gap-2 sm:grid-cols-2">
+            <button className={secondaryButtonClass} onClick={onCancel} type="button">Cancelar</button>
+            <button className={cn(primarySmallButtonClass, destructive && "border-rose-300/20 bg-rose-500 text-white hover:bg-rose-400")} onClick={onConfirm} type="button">{confirmation.confirmLabel}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 function TemporaryPasswordModal({ password, onClose }: { password: string; onClose: () => void }) {
+  const [closing, setClosing] = useState(false);
   useEffect(() => {
-    if (password) void navigator.clipboard?.writeText(password);
+    if (password) {
+      setClosing(false);
+      void navigator.clipboard?.writeText(password);
+    }
   }, [password]);
+  const close = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 180);
+  };
   if (!password) return null;
-  return <div className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/68 px-4 py-6 backdrop-blur-md"><div className="modal-panel glass-panel w-full max-w-md rounded-[1.75rem] border-emerald-400/20"><div className="border-b border-white/10 p-5"><h2 className="text-xl font-semibold text-white">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-slate-300">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={onClose}>Listo</button></div></div></div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/68 px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-white/10 p-5"><h2 className="text-xl font-semibold text-white">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-slate-300">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
 }
 function AddButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;
 }
-function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
-  return <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4"><span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white">{icon}</span><p className="mt-4 text-sm font-medium text-slate-400">{label}</p><p className="mt-1 text-3xl font-semibold text-white">{value}</p></article>;
+function Metric({
+  icon,
+  label,
+  value,
+  detail,
+  progress,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number | string;
+  detail: string;
+  progress?: number;
+  tone: "sky" | "emerald" | "amber" | "rose";
+}) {
+  const tones = {
+    sky: "border-sky-400/20 bg-sky-500/10 text-sky-300",
+    emerald: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300",
+    amber: "border-amber-400/20 bg-amber-500/10 text-amber-300",
+    rose: "border-rose-400/20 bg-rose-500/10 text-rose-300",
+  };
+  const bars = { sky: "bg-sky-400", emerald: "bg-emerald-400", amber: "bg-amber-400", rose: "bg-rose-400" };
+  return (
+    <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <span className={cn("inline-flex h-11 w-11 items-center justify-center rounded-2xl border", tones[tone])}>{icon}</span>
+        <p className="text-3xl font-semibold tracking-tight text-white">{value}</p>
+      </div>
+      <p className="mt-4 text-sm font-semibold text-slate-200">{label}</p>
+      <p className="mt-1 text-xs text-slate-500">{detail}</p>
+      {typeof progress === "number" ? <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className={cn("h-full rounded-full transition-[width] duration-500", bars[tone])} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div> : null}
+    </article>
+  );
 }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white">{icon}</span><h2 className="mt-4 text-lg font-semibold text-white">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">{text}</p></section>;
@@ -1347,8 +1642,17 @@ function DeleteButton({ onClick, label = "Eliminar" }: { onClick: () => void; la
   return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
 }
 function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: () => void; children: React.ReactNode }) {
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    if (modal) setClosing(false);
+  }, [modal]);
+  const close = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 180);
+  };
   if (!modal) return null;
-  return <div className="modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm"><div className={cn("modal-panel glass-panel w-full rounded-[1.75rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClose} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
 function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
   return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-300">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;
