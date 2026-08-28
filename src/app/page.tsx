@@ -1143,14 +1143,9 @@ function TerritoryChoiceList({
             <div className="min-w-0">
               <p className="font-medium">{territorySelectionLabel(territory, progress)}</p>
               <p className="mt-1 text-xs text-slate-500">
-                {completed
-                  ? `Completado el ${progress?.last_completed_at ? displayDate(progress.last_completed_at) : "sin fecha registrada"}`
-                  : blocked
-                    ? "Ya reservado o bloqueado"
-                    : progress?.last_completed_at
-                      ? `Última vez completado: ${displayDate(progress.last_completed_at)}`
-                      : "Disponible"}
+                {completed ? "Territorio completado" : blocked ? "Ya reservado o bloqueado" : "Disponible"}
               </p>
+              <p className="mt-1 text-xs font-medium text-teal-100/85">Última completada: {progress?.last_completed_at ? displayDate(progress.last_completed_at) : "Sin registro"}</p>
             </div>
           </label>
         );
