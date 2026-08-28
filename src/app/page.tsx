@@ -92,6 +92,7 @@ type TerritoryProgress = {
   total_blocks: number;
   completed_blocks: number;
   pending_labels: string[];
+  last_completed_at?: string | null;
 };
 type Notification = {
   id: string;
@@ -719,7 +720,7 @@ function AdminView({
   if (activeView === "territories") {
     return (
       <Panel title="Territorios" description="Cada territorio reúne sus manzanas y el avance de la vuelta activa." action={<AddButton onClick={() => setModal({ type: "territory" })}>Territorio</AddButton>}>
-        <DataTable headers={["Territorio", "Avance actual", "Manzanas", "Activo", "Acciones"]}>
+        <DataTable headers={["Territorio", "Avance actual", "Manzanas", "Última completada", "Activo", "Acciones"]}>
           {data.territories.map((territory) => {
             const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
             const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
@@ -745,6 +746,7 @@ function AdminView({
                   )}
                 </Cell>
                 <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-teal-300" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
+                <Cell>{progress?.last_completed_at ? displayDate(progress.last_completed_at) : <span className="text-slate-500">Sin registro</span>}</Cell>
                 <Cell>{territory.active ? "Si" : "No"}</Cell>
                 <Actions>
                   <IconButton label="Manzanas" onClick={() => setModal({ type: "territoryBlocks", territory })}><Grid3X3 size={16} /></IconButton>
@@ -1316,6 +1318,8 @@ function TerritoryBlocksModal({
   const [roundId, setRoundId] = useState(defaultRoundId);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [newLabels, setNewLabels] = useState<string[]>([]);
+  const [completionDate, setCompletionDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [isCompletionDateOpen, setCompletionDateOpen] = useState(false);
 
   const blocks = useMemo(
     () => data.blocks
@@ -1369,19 +1373,29 @@ function TerritoryBlocksModal({
   const completedNewLabels = newLabels.filter((label) => completedIds.has(`new:${label}`));
   const total = blocks.length + newLabels.length;
   const completedTotal = completedExistingIds.length + completedNewLabels.length;
+  const allCompleted = total > 0 && completedTotal === total;
+
+  function saveProgress(completedOn?: string) {
+    void mutate("setTerritoryBlockProgress", {
+      annual_round_id: roundId,
+      territory_id: territory.id,
+      completed_block_ids: completedExistingIds,
+      new_block_labels: newLabels,
+      completed_new_block_labels: completedNewLabels,
+      completed_on: completedOn,
+    });
+  }
 
   return (
     <form
       className="space-y-5 p-5"
       onSubmit={(event) => {
         event.preventDefault();
-        void mutate("setTerritoryBlockProgress", {
-          annual_round_id: roundId,
-          territory_id: territory.id,
-          completed_block_ids: completedExistingIds,
-          new_block_labels: newLabels,
-          completed_new_block_labels: completedNewLabels,
-        });
+        if (allCompleted) {
+          setCompletionDateOpen(true);
+          return;
+        }
+        saveProgress();
       }}
     >
       <div>
@@ -1461,8 +1475,23 @@ function TerritoryBlocksModal({
       )}
 
       <button className={primaryButtonClass} disabled={saving || !roundId} type="submit">
-        {saving ? "Guardando..." : "Guardar avance"}
+        {saving ? "Guardando..." : allCompleted ? "Registrar finalización" : "Guardar avance"}
       </button>
+
+      {isCompletionDateOpen ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="completion-date-title">
+          <section className="w-full max-w-sm rounded-2xl border border-teal-300/25 bg-[#142422] p-5 shadow-2xl">
+            <CalendarDays className="text-teal-200" size={22} aria-hidden="true" />
+            <h3 className="mt-4 text-lg font-semibold text-white" id="completion-date-title">Registrar territorio completado</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-300">Todas las manzanas están completas. Indica la fecha de finalización.</p>
+            <label className="mt-4 block text-sm font-medium text-slate-200">Fecha de finalización<input className={inputClass} type="date" value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} required /></label>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button className={secondaryButtonClass} type="button" onClick={() => setCompletionDateOpen(false)}>Volver</button>
+              <button className={primarySmallButtonClass} type="button" disabled={saving || !completionDate} onClick={() => saveProgress(completionDate)}>Guardar fecha</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </form>
   );
 }

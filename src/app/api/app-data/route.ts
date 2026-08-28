@@ -227,6 +227,13 @@ export async function GET() {
         .filter((status) => status.annual_round_id === activeRound?.id)
         .map((status) => [status.block_id, status.status]),
     );
+    const lastCompletionByTerritory = new Map<string, string>();
+    for (const status of statuses) {
+      const territoryId = status.blocks?.territory_id;
+      if (status.status !== "COMPLETED" || !status.completed_on || !territoryId) continue;
+      const current = lastCompletionByTerritory.get(territoryId);
+      if (!current || status.completed_on > current) lastCompletionByTerritory.set(territoryId, status.completed_on);
+    }
     const territoryProgress = (territoriesResult.data ?? []).map((territory) => {
       const territoryBlocks = blocks.filter((block) => block.territory_id === territory.id);
       const completedBlocks = territoryBlocks.filter((block) => activeStatuses.get(block.id) === "COMPLETED");
@@ -237,6 +244,7 @@ export async function GET() {
         pending_labels: territoryBlocks
           .filter((block) => activeStatuses.get(block.id) !== "COMPLETED")
           .map((block) => block.label),
+        last_completed_at: lastCompletionByTerritory.get(territory.id) ?? null,
       };
     });
 
@@ -485,6 +493,7 @@ export async function POST(request: Request) {
           ? payload.completed_new_block_labels.map((label) => String(label).trim().toUpperCase()).filter(Boolean)
           : [],
       );
+      const completedOn = typeof payload?.completed_on === "string" ? payload.completed_on : null;
 
       if (!annualRoundId || !territoryId) return fail("Falta seleccionar territorio y vuelta.", 422);
 
@@ -504,10 +513,18 @@ export async function POST(request: Request) {
         .eq("active", true);
       if (blocksError) return fail(blocksError.message);
 
+      const allCompleted = (territoryBlocks ?? []).length > 0 && (territoryBlocks ?? []).every(
+        (block) => completedBlockIds.has(block.id) || completedNewLabels.has(String(block.label).toUpperCase()),
+      );
+      if (allCompleted && (!completedOn || !/^\d{4}-\d{2}-\d{2}$/.test(completedOn))) {
+        return fail("Indica una fecha válida de finalización.", 422);
+      }
+
       const rows = (territoryBlocks ?? []).map((block) => ({
         annual_round_id: annualRoundId,
         block_id: block.id,
         status: completedBlockIds.has(block.id) || completedNewLabels.has(String(block.label).toUpperCase()) ? "COMPLETED" : "PENDING",
+        completed_on: allCompleted ? completedOn : null,
         updated_by: profile.id,
         updated_at: new Date().toISOString(),
       }));

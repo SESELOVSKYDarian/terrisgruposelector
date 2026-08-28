@@ -84,6 +84,7 @@ create table public.block_round_statuses (
   status public.block_status not null default 'PENDING',
   notes text,
   updated_by uuid references public.profiles(id),
+  completed_on date,
   updated_at timestamptz not null default now(),
   unique (annual_round_id, block_id)
 );

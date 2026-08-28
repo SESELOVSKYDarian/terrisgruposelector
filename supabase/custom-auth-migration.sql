@@ -13,6 +13,9 @@ alter table public.profiles
   add column if not exists must_change_password boolean not null default false,
   add column if not exists password_updated_at timestamptz not null default now();
 
+alter table public.block_round_statuses
+  add column if not exists completed_on date;
+
 update public.profiles
 set username = lower(replace(full_name, ' ', ''))
 where username is null;

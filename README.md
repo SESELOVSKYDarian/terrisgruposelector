@@ -16,6 +16,8 @@ de sabado/domingo.
 1. Crear un proyecto en Supabase.
 2. Ejecutar `supabase/schema.sql` en el SQL editor de Supabase.
 3. Si ya habias ejecutado la version anterior, ejecutar tambien `supabase/custom-auth-migration.sql`.
+   Para registrar la fecha de finalizacion de los territorios, ejecutar tambien
+   `supabase/completion-date-migration.sql`.
 4. Copiar `.env.example` a `.env.local` o completar `.env`.
 5. Completar:
 
