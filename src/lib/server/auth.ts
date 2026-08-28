@@ -26,14 +26,14 @@ const sessionCookieName = "terris_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 
 export function createAdminSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Faltan NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.");
+  if (!supabaseUrl || !secretKey) {
+    throw new Error("Faltan SUPABASE_URL y SUPABASE_SECRET_KEY.");
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient(supabaseUrl, secretKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -61,10 +61,10 @@ export function verifyPassword(password: string, storedHash: string) {
 }
 
 function getSessionSecret() {
-  const secret = process.env.SESSION_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secret = process.env.SESSION_SECRET ?? process.env.SUPABASE_JWT_SECRET;
 
   if (!secret) {
-    throw new Error("Falta SESSION_SECRET o SUPABASE_SERVICE_ROLE_KEY.");
+    throw new Error("Falta SESSION_SECRET o SUPABASE_JWT_SECRET.");
   }
 
   return secret;

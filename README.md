@@ -20,9 +20,10 @@ de sabado/domingo.
 5. Completar:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+SUPABASE_JWT_SECRET=
 SESSION_SECRET=
 SUPER_ADMIN_USERNAME=DaSeselovsky
 SUPER_ADMIN_PASSWORD=
@@ -31,6 +32,10 @@ SUPER_ADMIN_PASSWORD=
 El login inicial usa `SUPER_ADMIN_USERNAME` y `SUPER_ADMIN_PASSWORD`. La primera
 vez que ese usuario ingresa, la app crea/actualiza el perfil super admin y
 guarda la contrasena como hash en `public.profiles.password_hash`.
+
+Al conectar Supabase con Vercel, esas cuatro variables las agrega
+automaticamente. `SESSION_SECRET` sigue siendo opcional: si no se define, se
+usa `SUPABASE_JWT_SECRET` para firmar la cookie de sesion de la aplicacion.
 
 5. Instalar y correr:
 
