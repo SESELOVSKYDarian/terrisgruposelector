@@ -358,7 +358,7 @@ export default function Home() {
       <Toast toast={toast} onClose={() => setToast(null)} />
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {isAdmin ? (
-          <div className="grid items-start gap-4 lg:grid-cols-[236px_minmax(0,1fr)]">
+          <div className="grid items-start gap-4 lg:grid-cols-[72px_minmax(0,1fr)]">
             <AdminNav
               activeView={activeView}
               currentUser={profile}
@@ -462,12 +462,12 @@ function AdminNav({
     .toUpperCase();
 
   return (
-    <aside className="glass-panel flex h-fit min-w-0 flex-col gap-3 rounded-[1.5rem] p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[620px]" aria-label="Administracion">
+    <aside className="admin-sidebar glass-panel flex h-fit min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[620px]" aria-label="Administracion">
       <div className="flex items-center gap-3 px-2 py-2">
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white text-black">
           <ShieldCheck size={19} aria-hidden="true" />
         </span>
-        <div className="min-w-0">
+        <div className="admin-nav-copy min-w-0">
           <p className="truncate text-sm font-semibold text-white">Terris</p>
           <p className="truncate text-xs text-slate-500">Administración</p>
         </div>
@@ -477,7 +477,7 @@ function AdminNav({
         {tabs.map(({ id, label, icon }) => (
           <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
             <span className="shrink-0">{icon}</span>
-            <span className="whitespace-nowrap">{label}</span>
+            <span className="admin-nav-label whitespace-nowrap">{label}</span>
           </button>
         ))}
       </nav>
@@ -486,7 +486,7 @@ function AdminNav({
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] text-xs font-bold text-white">
           {initials}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="admin-nav-copy min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
           <p className="truncate text-xs text-slate-500">@{currentUser.username} · Super admin</p>
         </div>
@@ -535,8 +535,7 @@ function AdminTopbar({
         {unreadCount ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}
       </button>
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Panel administrativo</p>
-        <h1 className="truncate text-base font-semibold text-white sm:text-lg">{sectionLabels[activeView] ?? "Administración"}</h1>
+        <h1 className="truncate text-lg font-semibold tracking-tight text-white">{sectionLabels[activeView] ?? "Administración"}</h1>
       </div>
     </header>
   );
@@ -719,7 +718,7 @@ function AdminView({
 
   if (activeView === "territories") {
     return (
-      <Panel title="Territorios" description="Administra el numero del territorio y sus manzanas desde un solo lugar." action={<AddButton onClick={() => setModal({ type: "territory" })}>Territorio</AddButton>}>
+      <Panel title="Territorios" description="Cada territorio reúne sus manzanas y el avance de la vuelta activa." action={<AddButton onClick={() => setModal({ type: "territory" })}>Territorio</AddButton>}>
         <DataTable headers={["Territorio", "Avance actual", "Manzanas", "Activo", "Acciones"]}>
           {data.territories.map((territory) => {
             const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
@@ -745,7 +744,7 @@ function AdminView({
                     <span className="text-sm text-slate-400">Sin manzanas</span>
                   )}
                 </Cell>
-                <Cell>{data.blocks.filter((block) => block.territory_id === territory.id).length}</Cell>
+                <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-teal-300" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
                 <Cell>{territory.active ? "Si" : "No"}</Cell>
                 <Actions>
                   <IconButton label="Manzanas" onClick={() => setModal({ type: "territoryBlocks", territory })}><Grid3X3 size={16} /></IconButton>
@@ -762,7 +761,7 @@ function AdminView({
 
   if (activeView === "rounds") {
     return (
-      <Panel title="Vueltas" description="Crea varias vueltas por ano y administra su estado." action={<AddButton onClick={() => setModal({ type: "round" })}>Vuelta</AddButton>}>
+      <Panel title="Vueltas" description="Abre una vuelta para registrar el avance y conserva las anteriores como historial." action={<AddButton onClick={() => setModal({ type: "round" })}>Vuelta</AddButton>}>
         <DataTable headers={["Ano", "Vuelta", "Estado", "Manzanas", "Acciones"]}>
           {data.rounds.map((round) => (
             <tr key={round.id}><Cell>{round.year}</Cell><Cell><strong>{round.name}</strong></Cell><Cell><Badge className={round.status === "OPEN" ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-slate-400/25 bg-slate-500/10 text-slate-300"}>{round.status === "OPEN" ? "Abierta" : "Cerrada"}</Badge></Cell><Cell>{data.blockStatuses.filter((item) => item.annual_round_id === round.id).length}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "round", item: round })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "annual_rounds", id: round.id })} /></Actions></tr>
@@ -1386,8 +1385,7 @@ function TerritoryBlocksModal({
       }}
     >
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300/85">Manzanas</p>
-        <h2 className="mt-2 text-xl font-semibold text-white">Territorio #{territory.number}</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-white">Manzanas del territorio #{territory.number}</h2>
         <p className="mt-2 text-sm leading-6 text-slate-300">
           {round ? `${round.name} (${round.year})` : "Selecciona una vuelta para guardar el avance."}
         </p>
@@ -1404,7 +1402,7 @@ function TerritoryBlocksModal({
         </select>
       </Field>
 
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
+      <div className="rounded-2xl border border-teal-300/15 bg-teal-400/[0.045] p-4 sm:flex sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-white">{completedTotal}/{total || 0} completadas</p>
           <p className="mt-1 text-xs text-slate-400">{total > 0 && completedTotal === total ? "El territorio queda completo en esta vuelta." : "Toca cada manzana para marcarla o desmarcarla."}</p>
@@ -1424,7 +1422,7 @@ function TerritoryBlocksModal({
               <button
                 className={cn(
                   "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
-                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-sky-400/30 hover:bg-sky-500/8",
+                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-teal-300/35 hover:bg-teal-400/10",
                 )}
                 key={block.id}
                 onClick={() => toggle(block.id)}
@@ -1469,9 +1467,9 @@ function TerritoryBlocksModal({
   );
 }
 
-const inputClass = "mt-1 min-h-11 w-full rounded-2xl border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
-const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/14 bg-white px-4 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60";
-const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/14 bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60";
+const inputClass = "mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-teal-300/60 focus:ring-4 focus:ring-teal-300/10 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
+const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-teal-200/25 bg-teal-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-teal-200 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#091110] disabled:cursor-not-allowed disabled:opacity-60";
+const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-teal-200/25 bg-teal-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-teal-200 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#091110] disabled:cursor-not-allowed disabled:opacity-60";
 const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
 const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
 const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
