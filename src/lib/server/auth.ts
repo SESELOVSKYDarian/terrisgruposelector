@@ -10,7 +10,7 @@ export type SessionProfile = {
   username: string;
   full_name: string;
   group_id: string | null;
-  role: Role;
+  roles: Role[];
   active: boolean;
   must_change_password: boolean;
 };
@@ -18,7 +18,7 @@ export type SessionProfile = {
 type SessionPayload = {
   profileId: string;
   username: string;
-  role: Role;
+  roles: Role[];
   exp: number;
 };
 
@@ -101,7 +101,7 @@ export async function setSessionCookie(profile: SessionProfile) {
   const token = encodeSession({
     profileId: profile.id,
     username: profile.username,
-    role: profile.role,
+    roles: profile.roles,
     exp: Date.now() + sessionMaxAgeSeconds * 1000,
   });
 
@@ -130,7 +130,7 @@ export async function getCurrentProfile() {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, username, full_name, group_id, role, active, must_change_password")
+    .select("id, username, full_name, group_id, active, must_change_password, profile_roles(role)")
     .eq("id", payload.profileId)
     .single();
 
@@ -138,13 +138,24 @@ export async function getCurrentProfile() {
     return null;
   }
 
-  return data as SessionProfile;
+  const { profile_roles, ...rest } = data;
+  const roles = (profile_roles ?? []).map((entry: { role: Role }) => entry.role);
+
+  return { ...rest, roles } as SessionProfile;
 }
 
 export function assertAdmin(profile: SessionProfile) {
-  if (profile.role !== "ADMIN") {
+  if (!profile.roles.includes("ADMIN")) {
     throw new Error("No autorizado.");
   }
+}
+
+export function isConductor(profile: SessionProfile) {
+  return profile.roles.includes("CONDUCTOR");
+}
+
+export function isAnciano(profile: SessionProfile) {
+  return profile.roles.includes("ANCIANO");
 }
 
 export function generateTemporaryPassword() {

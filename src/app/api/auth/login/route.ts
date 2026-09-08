@@ -7,6 +7,7 @@ import {
   type SessionProfile,
 } from "@/lib/server/auth";
 import { fail } from "@/lib/server/responses";
+import type { Role } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
 
   const { data: existingProfile, error } = await supabase
     .from("profiles")
-    .select("id, username, full_name, group_id, role, active, must_change_password, password_hash")
+    .select("id, username, full_name, group_id, active, must_change_password, password_hash, profile_roles(role)")
     .eq("username", cleanUsername)
     .maybeSingle();
 
@@ -57,15 +58,17 @@ export async function POST(request: Request) {
         },
         { onConflict: "username" },
       )
-      .select("id, username, full_name, group_id, role, active, must_change_password")
+      .select("id, username, full_name, group_id, active, must_change_password")
       .single();
 
     if (upsertError || !adminProfile) {
       return fail(upsertError?.message ?? "No se pudo crear el super admin.", 500);
     }
 
-    await setSessionCookie(adminProfile as SessionProfile);
-    return NextResponse.json({ profile: adminProfile });
+    await supabase.from("profile_roles").upsert({ profile_id: adminProfile.id, role: "ADMIN" }, { onConflict: "profile_id,role" });
+    const profile: SessionProfile = { ...adminProfile, roles: ["ADMIN"] };
+    await setSessionCookie(profile);
+    return NextResponse.json({ profile });
   }
 
   if (!existingProfile || !existingProfile.active) {
@@ -81,7 +84,7 @@ export async function POST(request: Request) {
     username: existingProfile.username,
     full_name: existingProfile.full_name,
     group_id: existingProfile.group_id,
-    role: existingProfile.role,
+    roles: (existingProfile.profile_roles ?? []).map((entry: { role: Role }) => entry.role),
     active: existingProfile.active,
     must_change_password: existingProfile.must_change_password,
   };

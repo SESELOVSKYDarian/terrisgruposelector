@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const roles = ["ADMIN", "ANCIANO"] as const;
+export const roles = ["ADMIN", "ANCIANO", "CONDUCTOR"] as const;
 export const blockStatuses = [
   "PENDING",
   "IN_PROGRESS",
@@ -110,6 +110,37 @@ export function calculateTerritoryProgress(territory: Territory) {
 
 export function isTerritoryAvailable(territory: Territory) {
   return !territory.activeReservation && !territory.lockedReason;
+}
+
+export function formatPendingBlocks(labels: string[]) {
+  const numbered = labels
+    .map((label) => {
+      const match = label.match(/^([A-Za-z]*)(\d+)$/);
+      return match ? { prefix: match[1] || "M", num: Number(match[2]), label } : null;
+    })
+    .filter((entry): entry is { prefix: string; num: number; label: string } => entry !== null)
+    .sort((a, b) => a.num - b.num);
+
+  if (!numbered.length) return "";
+
+  const groups: string[] = [];
+  let start = numbered[0];
+  let prev = numbered[0];
+
+  for (let i = 1; i <= numbered.length; i += 1) {
+    const current = numbered[i];
+    if (current && current.num === prev.num + 1 && current.prefix === prev.prefix) {
+      prev = current;
+      continue;
+    }
+    groups.push(start === prev ? start.label : `${start.label}-${prev.label}`);
+    if (current) {
+      start = current;
+      prev = current;
+    }
+  }
+
+  return groups.join(",");
 }
 
 export const mockTerritories: Territory[] = [

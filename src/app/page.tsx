@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  formatPendingBlocks,
   reservationStatusLabels,
   serviceDayLabels,
   type BlockStatus,
@@ -35,6 +36,7 @@ import {
   type ServiceDay,
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
+import { BlockToggleGrid } from "./_components/block-toggle-grid";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -43,7 +45,7 @@ type Profile = {
   full_name: string;
   group_id: string | null;
   groups?: Pick<Group, "name"> | null;
-  role: Role;
+  roles: Role[];
   active: boolean;
   must_change_password: boolean;
 };
@@ -101,6 +103,45 @@ type Notification = {
   created_at: string;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
 };
+type TerritoryRound = {
+  id: string;
+  territory_id: string;
+  conductor_id: string;
+  assigned_on: string;
+  completed_on: string | null;
+  pending_block_labels: string[];
+  done_block_labels: string[];
+  territories?: Pick<Territory, "number" | "name"> | null;
+  profiles?: Pick<Profile, "full_name" | "username"> | null;
+};
+type WeeklyOutingSlotTerritory = {
+  id: string;
+  slot_id: string;
+  territory_id: string;
+  territory_round_id: string | null;
+  sort_order: number;
+  display_override: string | null;
+  territories?: Pick<Territory, "number"> | null;
+  territory_rounds?: { pending_block_labels: string[]; conductor_id: string } | null;
+};
+type WeeklyOutingSlot = {
+  id: string;
+  weekly_outing_id: string;
+  slot_date: string;
+  sort_order: number;
+  hora: string | null;
+  lugar: string | null;
+  conductor_id: string | null;
+  highlighted: boolean;
+  note: string | null;
+  profiles?: Pick<Profile, "full_name" | "username"> | null;
+  weekly_outing_slot_territories: WeeklyOutingSlotTerritory[];
+};
+type WeeklyOuting = {
+  id: string;
+  starts_on: string;
+  weekly_outing_slots: WeeklyOutingSlot[];
+};
 type AppData = {
   profile: Profile;
   groups: Group[];
@@ -115,6 +156,8 @@ type AppData = {
   blockStatuses: BlockRoundStatus[];
   profiles: Profile[];
   notifications: Notification[];
+  territoryRounds: TerritoryRound[];
+  weeklyOutings: WeeklyOuting[];
 };
 type ModalState =
   | { type: "territory"; item?: Territory }
@@ -143,7 +186,7 @@ const emptyProfile: Profile = {
   username: "",
   full_name: "",
   group_id: null,
-  role: "ANCIANO",
+  roles: [],
   active: false,
   must_change_password: false,
 };
@@ -161,6 +204,8 @@ const emptyData: AppData = {
   blockStatuses: [],
   profiles: [],
   notifications: [],
+  territoryRounds: [],
+  weeklyOutings: [],
 };
 
 const reservationStyles: Record<ReservationStatus, string> = {
@@ -219,7 +264,9 @@ export default function Home() {
   const [loadedAt, setLoadedAt] = useState(0);
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
-  const isAdmin = profile?.role === "ADMIN";
+  const isAdmin = Boolean(profile?.roles.includes("ADMIN"));
+  const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
+  const isConductor = Boolean(profile?.roles.includes("CONDUCTOR"));
   const openRound = data.rounds.find((round) => round.status === "OPEN");
   const unreadCount = data.notifications.filter((notification) => !notification.read_at).length;
 
@@ -385,7 +432,52 @@ export default function Home() {
               </div>
             </div>
           </div>
-        ) : (
+        ) : isAnciano && isConductor ? (
+          <>
+            <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{profile.full_name}</h1>
+                <div className="mt-3 flex gap-2">
+                  <button className={tabClass(activeView !== "conductorVisit")} onClick={() => setActiveView("reservations")} type="button">Reservas</button>
+                  <button className={tabClass(activeView === "conductorVisit")} onClick={() => setActiveView("conductorVisit")} type="button">Actualizar territorio</button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
+                  <RefreshCw size={18} aria-hidden="true" />Actualizar
+                </button>
+                <button className={secondaryButtonClass} onClick={logout} type="button">
+                  <LogOut size={18} aria-hidden="true" />Salir
+                </button>
+              </div>
+            </header>
+            {activeView === "conductorVisit" ? (
+              <ConductorVisitForm data={data} mutate={mutate} />
+            ) : (
+              <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
+            )}
+          </>
+        ) : isConductor ? (
+          <>
+            <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Actualizar territorio</h1>
+                <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
+                  <RefreshCw size={18} aria-hidden="true" />Actualizar
+                </button>
+                <button className={secondaryButtonClass} onClick={logout} type="button">
+                  <LogOut size={18} aria-hidden="true" />Salir
+                </button>
+              </div>
+            </header>
+            <ConductorVisitForm data={data} mutate={mutate} />
+          </>
+        ) : isAnciano ? (
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -405,6 +497,19 @@ export default function Home() {
               </div>
             </header>
             <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
+          </>
+        ) : (
+          <>
+            <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
+              </div>
+              <button className={secondaryButtonClass} onClick={logout} type="button">
+                <LogOut size={18} aria-hidden="true" />Salir
+              </button>
+            </header>
+            <EmptyState icon={<ShieldCheck size={24} />} title="No tenes secciones asignadas" text="Contacta al administrador para que te asigne un rol." />
           </>
         )}
       </div>
@@ -451,9 +556,13 @@ function AdminNav({
     { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
     { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
     { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
+    { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
     { id: "notifications", label: `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, icon: <Bell size={17} /> },
     { id: "groups", label: "Grupos", icon: <Users size={17} /> },
     { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
+    ...(currentUser.roles.includes("CONDUCTOR")
+      ? [{ id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> }]
+      : []),
   ];
   const initials = currentUser.full_name
     .split(" ")
@@ -516,8 +625,10 @@ function AdminTopbar({
     notifications: "Avisos",
     territories: "Territorios",
     rounds: "Vueltas",
+    outings: "Salidas semanales",
     groups: "Grupos",
     users: "Usuarios",
+    conductorVisit: "Actualizar territorio",
   };
   return (
     <header className="glass-panel flex min-h-16 items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
@@ -651,7 +762,7 @@ function AdminView({
   }
 
   if (activeView === "windows") {
-    const elderGroupIds = new Set(data.profiles.filter((profile) => profile.role === "ANCIANO" && profile.active && profile.group_id).map((profile) => profile.group_id));
+    const elderGroupIds = new Set(data.profiles.filter((profile) => profile.roles.includes("ANCIANO") && profile.active && profile.group_id).map((profile) => profile.group_id));
     return (
       <Panel title="Ventanas de reserva" description="Publica fechas, revisa cuántos territorios quedaron bloqueados y entra al bloqueo administrativo con un solo clic." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
         <DataTable headers={["Ventana", "Fechas", "Limite", "Respuestas", "Estado", "Acciones"]}>
@@ -773,6 +884,14 @@ function AdminView({
     );
   }
 
+  if (activeView === "outings") {
+    return <WeeklyOutingsPanel data={data} mutate={mutate} />;
+  }
+
+  if (activeView === "conductorVisit") {
+    return <ConductorVisitForm data={data} mutate={mutate} />;
+  }
+
   if (activeView === "groups") {
     return (
       <Panel title="Grupos" description="Administra los grupos disponibles." action={<AddButton onClick={() => setModal({ type: "group" })}>Grupo</AddButton>}>
@@ -788,9 +907,19 @@ function AdminView({
       <DataTable headers={["Usuario", "Nombre", "Grupo", "Rol", "Activo", "Estado", "Acciones"]}>
         {data.profiles.map((item) => (
           <tr key={item.id}>
-            <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.groups?.name ?? "-"}</Cell><Cell>{item.role === "ADMIN" ? "Super admin" : "Anciano"}</Cell><Cell>{item.active ? "Si" : "No"}</Cell>
+            <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.groups?.name ?? "-"}</Cell>
+            <Cell>
+              <div className="flex flex-wrap gap-1">
+                {item.roles.map((role) => (
+                  <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
+                    {role === "ADMIN" ? "Super admin" : role === "CONDUCTOR" ? "Conductor" : "Anciano"}
+                  </Badge>
+                ))}
+              </div>
+            </Cell>
+            <Cell>{item.active ? "Si" : "No"}</Cell>
             <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-            <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.role !== "ADMIN" ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+            <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
           </tr>
         ))}
       </DataTable>
@@ -1247,11 +1376,34 @@ function renderModal({
   }
   if (modal.type === "user") {
     return (
-      <FormModal title={modal.item ? "Editar usuario" : "Nuevo usuario"} onSubmit={(event) => submitFromForm(event, modal.item ? "updateUser" : "createUser", (form) => ({ id: modal.item?.id, username: form.get("username"), full_name: form.get("full_name"), group_id: form.get("group_id") || null, role: form.get("role"), active: form.get("active") === "true", passwordMode, password: form.get("password") }))} saving={saving}>
+      <FormModal
+        title={modal.item ? "Editar usuario" : "Nuevo usuario"}
+        onSubmit={(event) => submitFromForm(event, modal.item ? "updateUser" : "createUser", (form) => ({
+          id: modal.item?.id,
+          username: form.get("username"),
+          full_name: form.get("full_name"),
+          group_id: form.get("group_id") || null,
+          roles: form.getAll("roles"),
+          active: form.get("active") === "true",
+          passwordMode,
+          password: form.get("password"),
+        }))}
+        saving={saving}
+      >
         {!modal.item ? <Field label="Usuario"><input className={inputClass} name="username" required /></Field> : null}
         <Field label="Nombre completo"><input className={inputClass} name="full_name" defaultValue={modal.item?.full_name} required /></Field>
         <Field label="Grupo"><select className={inputClass} name="group_id" defaultValue={modal.item?.group_id ?? ""}><option value="">Sin grupo</option>{data.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></Field>
-        <Field label="Rol"><select className={inputClass} name="role" defaultValue={modal.item?.role ?? "ANCIANO"}><option value="ANCIANO">Anciano</option><option value="ADMIN">Super admin</option></select></Field>
+        <fieldset>
+          <legend className="text-sm font-medium text-slate-200">Roles</legend>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {([["ADMIN", "Super admin"], ["ANCIANO", "Anciano"], ["CONDUCTOR", "Conductor"]] as const).map(([value, label]) => (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-100" key={value}>
+                <input className="h-4 w-4 accent-white" defaultChecked={modal.item?.roles.includes(value) ?? value === "ANCIANO"} name="roles" type="checkbox" value={value} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
         {modal.item ? <Field label="Activo"><select className={inputClass} name="active" defaultValue={modal.item.active ? "true" : "false"}><option value="true">Si</option><option value="false">No</option></select></Field> : null}
         {!modal.item ? <><Field label="Contrasena"><select className={inputClass} value={passwordMode} onChange={(event) => setPasswordMode(event.target.value as "manual" | "generate")}><option value="generate">Generar temporal</option><option value="manual">Escribir manual</option></select></Field><Field label="Contrasena manual"><input className={inputClass} name="password" disabled={passwordMode === "generate"} type="password" /></Field></> : null}
       </FormModal>
@@ -1302,6 +1454,377 @@ function renderModal({
     );
   }
   return null;
+}
+
+function ConductorVisitForm({
+  data,
+  mutate,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const openRoundByTerritory = useMemo(
+    () => new Map(data.territoryRounds.filter((round) => !round.completed_on).map((round) => [round.territory_id, round])),
+    [data.territoryRounds],
+  );
+  const sortedTerritories = useMemo(() => {
+    return [...data.territories].sort((a, b) => {
+      const aMine = openRoundByTerritory.get(a.id)?.conductor_id === data.profile.id ? 0 : 1;
+      const bMine = openRoundByTerritory.get(b.id)?.conductor_id === data.profile.id ? 0 : 1;
+      return aMine - bMine || a.number - b.number;
+    });
+  }, [data.territories, data.profile.id, openRoundByTerritory]);
+
+  const [territoryId, setTerritoryId] = useState(sortedTerritories[0]?.id ?? "");
+  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [doneLabels, setDoneLabels] = useState<Set<string>>(new Set());
+
+  const territoryBlocks = useMemo(
+    () => data.blocks.filter((block) => block.territory_id === territoryId).map((block) => block.label),
+    [data.blocks, territoryId],
+  );
+  const openRound = openRoundByTerritory.get(territoryId);
+  const pendingLabels = useMemo(() => {
+    const base = openRound ? openRound.pending_block_labels : territoryBlocks;
+    return [...base].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+  }, [openRound, territoryBlocks]);
+
+  useEffect(() => {
+    setDoneLabels(new Set());
+  }, [territoryId]);
+
+  function toggle(label: string) {
+    setDoneLabels((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!territoryId) return;
+    const stillPending = pendingLabels.filter((label) => !doneLabels.has(label));
+    const result = await mutate("submitTerritoryVisit", {
+      territory_id: territoryId,
+      visit_date: visitDate,
+      done_labels: [...doneLabels],
+      pending_labels: stillPending,
+    });
+    if (result) setDoneLabels(new Set());
+  }
+
+  if (!sortedTerritories.length) {
+    return <EmptyState icon={<MapIcon size={24} />} title="No hay territorios activos" text="Cuando el administrador cargue territorios, vas a poder registrar tus visitas aca." />;
+  }
+
+  return (
+    <section className="glass-panel floating-card rounded-[1.75rem] p-5 sm:p-6">
+      <form className="space-y-5" onSubmit={submit}>
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-white">Actualizar territorio</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Vas a registrar esta visita como <strong className="text-white">{data.profile.full_name}</strong> (@{data.profile.username}).
+          </p>
+        </div>
+
+        <Field label="Territorio">
+          <select className={inputClass} onChange={(event) => setTerritoryId(event.target.value)} value={territoryId} required>
+            {sortedTerritories.map((territory) => {
+              const round = openRoundByTerritory.get(territory.id);
+              const mine = round?.conductor_id === data.profile.id;
+              const pendingText = round?.pending_block_labels.length ? ` - Faltan ${formatPendingBlocks(round.pending_block_labels)}` : "";
+              return (
+                <option key={territory.id} value={territory.id}>
+                  Territorio #{territory.number}{pendingText}{mine ? " (tuyo)" : ""}
+                </option>
+              );
+            })}
+          </select>
+        </Field>
+
+        <Field label="Fecha"><input className={inputClass} onChange={(event) => setVisitDate(event.target.value)} type="date" value={visitDate} required /></Field>
+
+        <div>
+          <p className="text-sm font-medium text-slate-200">Manzanas</p>
+          <p className="mt-1 text-xs text-slate-400">Toca las que completaste en esta visita. Las que queden sin tocar se guardan como pendientes.</p>
+          <div className="mt-3">
+            {pendingLabels.length ? (
+              <BlockToggleGrid
+                blocks={pendingLabels.map((label) => ({ id: label, label }))}
+                onToggle={toggle}
+                selectedIds={doneLabels}
+              />
+            ) : (
+              <p className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-center text-sm text-slate-400">Este territorio no tiene manzanas cargadas.</p>
+            )}
+          </div>
+        </div>
+
+        <button className={primaryButtonClass} disabled={!pendingLabels.length} type="submit">
+          <Save size={18} aria-hidden="true" />Guardar visita
+        </button>
+      </form>
+    </section>
+  );
+}
+
+const monthNamesEs = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const outingDayLabels = ["Jueves", "Viernes", "Sabado", "Domingo", "Lunes", "Martes", "Miercoles"];
+
+function addDays(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day + days));
+  return result.toISOString().slice(0, 10);
+}
+
+function displayDateEs(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return `${day} de ${monthNamesEs[month - 1]}`;
+}
+
+function WeeklyOutingsPanel({
+  data,
+  mutate,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+}) {
+  const [selectedId, setSelectedId] = useState(data.weeklyOutings[0]?.id ?? "");
+  const outing = data.weeklyOutings.find((item) => item.id === selectedId) ?? data.weeklyOutings[0];
+  const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
+
+  function nextThursdayDefault() {
+    const today = new Date();
+    const day = today.getUTCDay();
+    const diff = (4 - day + 7) % 7 || 7;
+    return addDays(today.toISOString().slice(0, 10), diff);
+  }
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="Salidas semanales"
+        description="Una fila por horario, agrupadas por dia, de jueves a miercoles."
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <select className={compactSelectClass} onChange={(event) => setSelectedId(event.target.value)} value={outing?.id ?? ""}>
+              {data.weeklyOutings.map((item) => (
+                <option key={item.id} value={item.id}>
+                  Salidas del {displayDateEs(item.starts_on)} al {displayDateEs(addDays(item.starts_on, 6))}
+                </option>
+              ))}
+            </select>
+            <AddButton onClick={() => void mutate("createWeeklyOuting", { starts_on: nextThursdayDefault() })}>Semana</AddButton>
+            {outing ? <DeleteButton label="Eliminar semana" onClick={() => void mutate("deleteWeeklyOuting", { id: outing.id })} /> : null}
+          </div>
+        }
+      >
+        {outing ? (
+          <WeeklyOutingTable data={data} conductors={conductors} mutate={mutate} outing={outing} />
+        ) : (
+          <EmptyState icon={<CalendarDays size={24} />} title="Todavia no hay semanas cargadas" text="Crea una semana para empezar a completar horarios." />
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function WeeklyOutingTable({
+  data,
+  conductors,
+  mutate,
+  outing,
+}: {
+  data: AppData;
+  conductors: Profile[];
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  outing: WeeklyOuting;
+}) {
+  return (
+    <div className="space-y-5">
+      {outingDayLabels.map((dayLabel, index) => {
+        const slotDate = addDays(outing.starts_on, index);
+        const slots = outing.weekly_outing_slots
+          .filter((slot) => slot.slot_date === slotDate)
+          .sort((a, b) => a.sort_order - b.sort_order);
+        return (
+          <div className="overflow-hidden rounded-2xl border border-white/8" key={slotDate}>
+            <div className="sticky top-0 flex items-center justify-between bg-white/[0.04] px-4 py-2.5">
+              <p className="text-sm font-semibold text-white">{dayLabel} - {displayDateEs(slotDate)}</p>
+              <button className={miniButtonClass} onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })} type="button">
+                <Plus size={14} />Agregar salida
+              </button>
+            </div>
+            <div className="divide-y divide-white/8">
+              {slots.map((slot, slotIndex) => (
+                <WeeklyOutingSlotRow conductors={conductors} data={data} key={slot.id} mutate={mutate} slot={slot} striped={slotIndex % 2 === 1} />
+              ))}
+              {!slots.length ? <p className="px-4 py-3 text-sm text-slate-500">Sin salidas cargadas.</p> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WeeklyOutingSlotRow({
+  data,
+  conductors,
+  mutate,
+  slot,
+  striped,
+}: {
+  data: AppData;
+  conductors: Profile[];
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  slot: WeeklyOutingSlot;
+  striped: boolean;
+}) {
+  const [territoryModalOpen, setTerritoryModalOpen] = useState(false);
+  const territoryText = [...slot.weekly_outing_slot_territories]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((entry) => {
+      if (entry.display_override) return entry.display_override;
+      const number = entry.territories?.number ?? "?";
+      const pending = entry.territory_rounds?.pending_block_labels ?? [];
+      return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
+    })
+    .join("+");
+
+  return (
+    <div className={cn("grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[110px_1fr_1fr_1fr_auto] sm:items-center", slot.highlighted ? "border-l-2 border-teal-300/25 bg-teal-400/[0.06]" : striped ? "bg-white/[0.02]" : "")}>
+      <input
+        className={compactSelectClass}
+        defaultValue={slot.hora ?? ""}
+        onBlur={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, hora: event.target.value })}
+        type="time"
+      />
+      <select
+        className={compactSelectClass}
+        defaultValue={slot.conductor_id ?? ""}
+        onChange={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, conductor_id: event.target.value || null })}
+      >
+        <option value="">Sin conductor</option>
+        {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
+      </select>
+      <input
+        className={compactSelectClass}
+        defaultValue={slot.lugar ?? ""}
+        onBlur={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, lugar: event.target.value })}
+        placeholder="Lugar"
+      />
+      <button className={cn(compactSelectClass, "text-left")} onClick={() => setTerritoryModalOpen(true)} type="button">
+        {territoryText || "Elegir territorios"}
+      </button>
+      <div className="flex items-center gap-1.5 justify-self-end">
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
+          <input checked={slot.highlighted} className="h-3.5 w-3.5 accent-teal-300" onChange={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, highlighted: event.target.checked })} type="checkbox" />
+          Destacar
+        </label>
+        <DeleteButton onClick={() => void mutate("deleteWeeklyOutingSlot", { id: slot.id })} />
+      </div>
+      {territoryModalOpen ? (
+        <SlotTerritoryModal data={data} mutate={mutate} onClose={() => setTerritoryModalOpen(false)} slot={slot} />
+      ) : null}
+    </div>
+  );
+}
+
+function SlotTerritoryModal({
+  data,
+  mutate,
+  onClose,
+  slot,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  onClose: () => void;
+  slot: WeeklyOutingSlot;
+}) {
+  const [entries, setEntries] = useState(
+    [...slot.weekly_outing_slot_territories]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((entry) => ({
+        territory_id: entry.territory_id,
+        territory_round_id: entry.territory_round_id,
+        display_override: entry.display_override ?? "",
+      })),
+  );
+
+  function addEntry() {
+    const first = data.territories[0];
+    if (!first) return;
+    setEntries((current) => [...current, { territory_id: first.id, territory_round_id: null, display_override: "" }]);
+  }
+
+  function updateEntry(index: number, patch: Partial<(typeof entries)[number]>) {
+    setEntries((current) => current.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+  }
+
+  function removeEntry(index: number) {
+    setEntries((current) => current.filter((_, i) => i !== index));
+  }
+
+  async function save() {
+    const result = await mutate("setSlotTerritories", {
+      slot_id: slot.id,
+      territories: entries.map((entry) => ({
+        territory_id: entry.territory_id,
+        territory_round_id: entry.territory_round_id || null,
+        display_override: entry.display_override || null,
+      })),
+    });
+    if (result) onClose();
+  }
+
+  return (
+    <div className="modal-overlay fixed inset-0 z-[75] col-span-full grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-white/10 p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-xl font-semibold tracking-tight text-white">Territorios de la fila</h2>
+          <button className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl text-slate-400 hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} /></button>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-slate-400">Podes elegir cualquier territorio y, si corresponde, una vuelta especifica del historial. El texto se autocompleta con las manzanas pendientes; podes editarlo a mano.</p>
+
+        <div className="mt-4 space-y-3">
+          {entries.map((entry, index) => {
+            const roundsForTerritory = data.territoryRounds.filter((round) => round.territory_id === entry.territory_id);
+            return (
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-3" key={index}>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <select className={inputClass} onChange={(event) => updateEntry(index, { territory_id: event.target.value, territory_round_id: null })} value={entry.territory_id}>
+                    {data.territories.map((territory) => <option key={territory.id} value={territory.id}>Territorio #{territory.number}</option>)}
+                  </select>
+                  <select className={inputClass} onChange={(event) => updateEntry(index, { territory_round_id: event.target.value || null })} value={entry.territory_round_id ?? ""}>
+                    <option value="">Vuelta abierta mas reciente</option>
+                    {roundsForTerritory.map((round) => (
+                      <option key={round.id} value={round.id}>
+                        {round.completed_on ? "Cerrada" : "Abierta"} - {displayDate(round.assigned_on)}{round.pending_block_labels.length ? ` - Faltan ${formatPendingBlocks(round.pending_block_labels)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input className={inputClass + " mt-0"} onChange={(event) => updateEntry(index, { display_override: event.target.value })} placeholder="Texto manual (ej. 16Cont, 36*)" value={entry.display_override} />
+                  <DeleteButton onClick={() => removeEntry(index)} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button className={miniButtonClass + " mt-3"} onClick={addEntry} type="button"><Plus size={14} />Agregar territorio</button>
+
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button className={secondaryButtonClass} onClick={onClose} type="button">Cancelar</button>
+          <button className={primarySmallButtonClass} onClick={() => void save()} type="button">Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TerritoryBlocksModal({
@@ -1430,43 +1953,14 @@ function TerritoryBlocksModal({
       </div>
 
       {total ? (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-          {blocks.map((block) => {
-            const selected = completedIds.has(block.id);
-            return (
-              <button
-                className={cn(
-                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
-                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-teal-300/35 hover:bg-teal-400/10",
-                )}
-                key={block.id}
-                onClick={() => toggle(block.id)}
-                type="button"
-              >
-                <span>{block.label}</span>
-                <span className="mt-1 text-[11px] font-medium">{selected ? "Completa" : "Pendiente"}</span>
-              </button>
-            );
-          })}
-          {newLabels.map((label) => {
-            const id = `new:${label}`;
-            const selected = completedIds.has(id);
-            return (
-              <button
-                className={cn(
-                  "flex aspect-square min-h-20 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
-                  selected ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-100" : "border-sky-400/35 bg-sky-500/10 text-sky-100 hover:bg-sky-500/14",
-                )}
-                key={id}
-                onClick={() => toggle(id)}
-                type="button"
-              >
-                <span>{label}</span>
-                <span className="mt-1 text-[11px] font-medium">{selected ? "Nueva completa" : "Nueva"}</span>
-              </button>
-            );
-          })}
-        </div>
+        <BlockToggleGrid
+          blocks={[
+            ...blocks.map((block) => ({ id: block.id, label: block.label })),
+            ...newLabels.map((label) => ({ id: `new:${label}`, label, variant: "new" as const })),
+          ]}
+          onToggle={toggle}
+          selectedIds={completedIds}
+        />
       ) : (
         <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-8 text-center">
           <Grid3X3 className="mx-auto text-slate-500" size={28} />
