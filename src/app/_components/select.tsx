@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const SEARCH_THRESHOLD = 7;
 
 export type SelectOption = { value: string; label: string };
 
@@ -22,8 +24,15 @@ export function Select({
   size?: "default" | "compact";
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value);
+  const showSearch = options.length > SEARCH_THRESHOLD;
+  const filteredOptions = useMemo(() => {
+    if (!showSearch || !query.trim()) return options;
+    const term = query.trim().toLowerCase();
+    return options.filter((option) => option.label.toLowerCase().includes(term));
+  }, [options, query, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -32,6 +41,10 @@ export function Select({
     }
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setQuery("");
   }, [open]);
 
   return (
@@ -50,8 +63,22 @@ export function Select({
         <ChevronDown aria-hidden="true" className={cn("shrink-0 text-slate-500 transition-transform", open && "rotate-180")} size={14} />
       </button>
       {open ? (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[180px] overflow-y-auto rounded-lg border border-white/10 bg-[#0c1615] py-1 shadow-2xl">
-          {options.map((option) => (
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[180px] overflow-hidden rounded-lg border border-white/10 bg-[#0c1615] shadow-2xl">
+          {showSearch ? (
+            <div className="relative border-b border-white/10 p-1.5">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={13} />
+              <input
+                autoFocus
+                className="h-8 w-full rounded-md bg-black/25 pl-7 pr-2 text-sm text-white outline-none placeholder:text-slate-600"
+                onChange={(event) => setQuery(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                placeholder="Buscar..."
+                value={query}
+              />
+            </div>
+          ) : null}
+          <div className="max-h-64 overflow-y-auto py-1">
+          {filteredOptions.map((option) => (
             <button
               className={cn(
                 "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition hover:bg-white/[0.06]",
@@ -68,7 +95,8 @@ export function Select({
               {option.value === value ? <Check aria-hidden="true" className="shrink-0 text-primary-hover" size={14} /> : null}
             </button>
           ))}
-          {!options.length ? <p className="px-3 py-2 text-sm text-slate-500">Sin opciones.</p> : null}
+          {!filteredOptions.length ? <p className="px-3 py-2 text-sm text-slate-500">Sin opciones.</p> : null}
+          </div>
         </div>
       ) : null}
     </div>

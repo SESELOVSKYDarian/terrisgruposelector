@@ -45,6 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
+import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -1032,37 +1033,7 @@ function AdminView({
   }
 
   if (activeView === "windows") {
-    const elderGroupIds = new Set(data.profiles.filter((profile) => profile.roles.includes("ANCIANO") && profile.active && profile.group_id).map((profile) => profile.group_id));
-    return (
-      <Panel title="Ventanas de reserva" description="Publica fechas, revisa cuántos territorios quedaron bloqueados y entra al bloqueo administrativo con un solo clic." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
-        <DataTable headers={["Ventana", "Fechas", "Limite", "Respuestas", "Estado", "Acciones"]}>
-          {data.reservationWindows.map((window) => {
-            const elderWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && !item.reserved_by_admin);
-            const adminWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && item.reserved_by_admin);
-            const expectedDates = [window.saturday_date, window.sunday_date].filter(Boolean).length;
-            const expectedReservations = elderGroupIds.size * expectedDates;
-            const expired = new Date(window.booking_deadline).getTime() < loadedAt;
-            return (
-              <tr key={window.id}>
-                <Cell><strong>{window.name}</strong></Cell>
-                <Cell>{[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" - ")}</Cell>
-                <Cell>{displayDateTime(window.booking_deadline)}</Cell>
-                <Cell>
-                  <strong>{elderWindowReservations.length}/{expectedReservations}</strong> reservas
-                  {adminWindowReservations.length ? <span className="mt-1 block text-xs text-slate-400">{adminWindowReservations.length} bloqueos admin</span> : null}
-                </Cell>
-                <Cell><Badge className={!window.active || expired ? "border-slate-500/30 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>{!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}</Badge></Cell>
-                <Actions>
-                  <IconButton label="Bloquear territorios" onClick={() => setModal({ type: "adminReservation", window })}><ShieldCheck size={16} /></IconButton>
-                  <IconButton label="Editar" onClick={() => setModal({ type: "window", item: window })}><Edit3 size={16} /></IconButton>
-                  <DeleteButton onClick={() => void mutate("deleteWindow", { id: window.id })} />
-                </Actions>
-              </tr>
-            );
-          })}
-        </DataTable>
-      </Panel>
-    );
+    return <WindowsPanel data={data} loadedAt={loadedAt} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "reservations") {
@@ -1074,59 +1045,11 @@ function AdminView({
   }
 
   if (activeView === "territories") {
-    return (
-      <Panel title="Territorios" description="Cada territorio reúne sus manzanas y el avance de la vuelta activa." action={<AddButton onClick={() => setModal({ type: "territory" })}>Territorio</AddButton>}>
-        <DataTable headers={["Territorio", "Avance actual", "Manzanas", "Última completada", "Activo", "Acciones"]}>
-          {data.territories.map((territory) => {
-            const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
-            const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
-            return (
-              <tr key={territory.id}>
-                <Cell>
-                  <strong>Territorio #{territory.number}</strong>
-                  {!openRound ? <span className="mt-1 block text-xs text-slate-400">Sin vuelta abierta</span> : null}
-                </Cell>
-                <Cell>
-                  {progress?.total_blocks ? (
-                    <div className="min-w-40">
-                      <div className="flex items-center gap-2">
-                        <Badge className={completed ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-sky-400/30 bg-sky-500/12 text-sky-200"}>
-                          {completed ? "Completo" : `${progress.completed_blocks}/${progress.total_blocks}`}
-                        </Badge>
-                        <span className="text-xs text-slate-400">en {openRound?.name ?? "la vuelta"}</span>
-                      </div>
-                      {!completed && progress.completed_blocks > 0 ? <p className="mt-1 text-xs text-slate-400">Faltan {progress.pending_labels.join(", ")}</p> : null}
-                    </div>
-                  ) : (
-                    <span className="text-sm text-slate-400">Sin manzanas</span>
-                  )}
-                </Cell>
-                <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-primary" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
-                <Cell>{progress?.last_completed_at ? displayDate(progress.last_completed_at) : <span className="text-slate-500">Sin registro</span>}</Cell>
-                <Cell>{territory.active ? "Si" : "No"}</Cell>
-                <Actions>
-                  <IconButton label="Manzanas" onClick={() => setModal({ type: "territoryBlocks", territory })}><Grid3X3 size={16} /></IconButton>
-                  <IconButton label="Editar" onClick={() => setModal({ type: "territory", item: territory })}><Edit3 size={16} /></IconButton>
-                  <DeleteButton onClick={() => void mutate("deleteRow", { table: "territories", id: territory.id })} />
-                </Actions>
-              </tr>
-            );
-          })}
-        </DataTable>
-      </Panel>
-    );
+    return <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "rounds") {
-    return (
-      <Panel title="Vueltas" description="Abre una vuelta para registrar el avance y conserva las anteriores como historial." action={<AddButton onClick={() => setModal({ type: "round" })}>Vuelta</AddButton>}>
-        <DataTable headers={["Ano", "Vuelta", "Estado", "Manzanas", "Acciones"]}>
-          {data.rounds.map((round) => (
-            <tr key={round.id}><Cell>{round.year}</Cell><Cell><strong>{round.name}</strong></Cell><Cell><Badge className={round.status === "OPEN" ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-slate-400/25 bg-slate-500/10 text-slate-300"}>{round.status === "OPEN" ? "Abierta" : "Cerrada"}</Badge></Cell><Cell>{data.blockStatuses.filter((item) => item.annual_round_id === round.id).length}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "round", item: round })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "annual_rounds", id: round.id })} /></Actions></tr>
-          ))}
-        </DataTable>
-      </Panel>
-    );
+    return <RoundsPanel data={data} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "outings") {
@@ -1138,39 +1061,7 @@ function AdminView({
   }
 
   if (activeView === "departurePoints") {
-    return (
-      <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los territorios asociados son los mas cercanos a esa zona, en orden — el generador automatico de Salidas semanales los usa para elegir bien." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
-        <DataTable headers={["Nombre", "Direccion", "Territorios cercanos (de mas a menos)", "Acciones"]}>
-          {data.departurePoints.map((point) => {
-            const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
-            return (
-              <tr key={point.id}>
-                <Cell><strong>{point.name}</strong></Cell>
-                <Cell>{point.address}</Cell>
-                <Cell>
-                  {territories.length ? (
-                    <div className="flex flex-wrap items-center gap-1">
-                      {territories.map((entry, index) => (
-                        <span className="inline-flex items-center gap-1" key={entry.territory_id}>
-                          <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200">#{entry.territories?.number ?? "?"}</span>
-                          {index < territories.length - 1 ? <span className="text-slate-600">&rarr;</span> : null}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500">Sin asociar</span>
-                  )}
-                </Cell>
-                <Actions>
-                  <IconButton label="Editar" onClick={() => setModal({ type: "departurePoint", item: point })}><Edit3 size={16} /></IconButton>
-                  <DeleteButton onClick={() => void mutate("deleteRow", { table: "departure_points", id: point.id })} />
-                </Actions>
-              </tr>
-            );
-          })}
-        </DataTable>
-      </Panel>
-    );
+    return <DeparturePointsPanel data={data} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "conductorVisit") {
@@ -1182,19 +1073,244 @@ function AdminView({
   }
 
   if (activeView === "groups") {
-    return (
-      <Panel title="Grupos" description="Administra los grupos disponibles." action={<AddButton onClick={() => setModal({ type: "group" })}>Grupo</AddButton>}>
-        <DataTable headers={["Grupo", "Activo", "Acciones"]}>
-          {data.groups.map((group) => <tr key={group.id}><Cell><strong>{group.name}</strong></Cell><Cell>{group.active ? "Si" : "No"}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "group", item: group })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "groups", id: group.id })} /></Actions></tr>)}
-        </DataTable>
-      </Panel>
-    );
+    return <GroupsPanel data={data} mutate={mutate} setModal={setModal} />;
   }
+
+  return <UsersPanel data={data} mutate={mutate} setModal={setModal} />;
+}
+
+function WindowsPanel({
+  data,
+  loadedAt,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  loadedAt: number;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const elderGroupIds = new Set(data.profiles.filter((profile) => profile.roles.includes("ANCIANO") && profile.active && profile.group_id).map((profile) => profile.group_id));
+  const controls = useListControls({
+    items: data.reservationWindows,
+    searchText: (window) => window.name,
+    dateValue: (window) => window.saturday_date ?? window.sunday_date,
+  });
+
+  return (
+    <Panel title="Ventanas de reserva" description="Publica fechas, revisa cuántos territorios quedaron bloqueados y entra al bloqueo administrativo con un solo clic." action={<AddButton onClick={() => setModal({ type: "window" })}>Ventana</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar ventana..." query={controls.query} showDateFilter dateFrom={controls.dateFrom} dateTo={controls.dateTo} onDateFromChange={controls.setDateFrom} onDateToChange={controls.setDateTo} onQuickRange={controls.setQuickRange} />
+      <DataTable headers={["Ventana", "Fechas", "Limite", "Respuestas", "Estado", "Acciones"]}>
+        {controls.paged.map((window) => {
+          const elderWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && !item.reserved_by_admin);
+          const adminWindowReservations = data.reservations.filter((item) => item.reservation_window_id === window.id && item.status === "ACTIVE" && item.reserved_by_admin);
+          const expectedDates = [window.saturday_date, window.sunday_date].filter(Boolean).length;
+          const expectedReservations = elderGroupIds.size * expectedDates;
+          const expired = new Date(window.booking_deadline).getTime() < loadedAt;
+          return (
+            <tr key={window.id}>
+              <Cell><strong>{window.name}</strong></Cell>
+              <Cell>{[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" - ")}</Cell>
+              <Cell>{displayDateTime(window.booking_deadline)}</Cell>
+              <Cell>
+                <strong>{elderWindowReservations.length}/{expectedReservations}</strong> reservas
+                {adminWindowReservations.length ? <span className="mt-1 block text-xs text-slate-400">{adminWindowReservations.length} bloqueos admin</span> : null}
+              </Cell>
+              <Cell><Badge className={!window.active || expired ? "border-slate-500/30 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>{!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}</Badge></Cell>
+              <Actions>
+                <IconButton label="Bloquear territorios" onClick={() => setModal({ type: "adminReservation", window })}><ShieldCheck size={16} /></IconButton>
+                <IconButton label="Editar" onClick={() => setModal({ type: "window", item: window })}><Edit3 size={16} /></IconButton>
+                <DeleteButton onClick={() => void mutate("deleteWindow", { id: window.id })} />
+              </Actions>
+            </tr>
+          );
+        })}
+      </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+    </Panel>
+  );
+}
+
+function TerritoriesPanel({
+  data,
+  openRound,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  openRound?: Round;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const controls = useListControls({
+    items: data.territories,
+    searchText: (territory) => `territorio ${territory.number}`,
+  });
+
+  return (
+    <Panel title="Territorios" description="Cada territorio reúne sus manzanas y el avance de la vuelta activa." action={<AddButton onClick={() => setModal({ type: "territory" })}>Territorio</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por numero..." query={controls.query} />
+      <DataTable headers={["Territorio", "Avance actual", "Manzanas", "Última completada", "Activo", "Acciones"]}>
+        {controls.paged.map((territory) => {
+          const progress = data.territoryProgress.find((item) => item.territory_id === territory.id);
+          const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
+          return (
+            <tr key={territory.id}>
+              <Cell>
+                <strong>Territorio #{territory.number}</strong>
+                {!openRound ? <span className="mt-1 block text-xs text-slate-400">Sin vuelta abierta</span> : null}
+              </Cell>
+              <Cell>
+                {progress?.total_blocks ? (
+                  <div className="min-w-40">
+                    <div className="flex items-center gap-2">
+                      <Badge className={completed ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-sky-400/30 bg-sky-500/12 text-sky-200"}>
+                        {completed ? "Completo" : `${progress.completed_blocks}/${progress.total_blocks}`}
+                      </Badge>
+                      <span className="text-xs text-slate-400">en {openRound?.name ?? "la vuelta"}</span>
+                    </div>
+                    {!completed && progress.completed_blocks > 0 ? <p className="mt-1 text-xs text-slate-400">Faltan {progress.pending_labels.join(", ")}</p> : null}
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-400">Sin manzanas</span>
+                )}
+              </Cell>
+              <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-primary" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
+              <Cell>{progress?.last_completed_at ? displayDate(progress.last_completed_at) : <span className="text-slate-500">Sin registro</span>}</Cell>
+              <Cell>{territory.active ? "Si" : "No"}</Cell>
+              <Actions>
+                <IconButton label="Manzanas" onClick={() => setModal({ type: "territoryBlocks", territory })}><Grid3X3 size={16} /></IconButton>
+                <IconButton label="Editar" onClick={() => setModal({ type: "territory", item: territory })}><Edit3 size={16} /></IconButton>
+                <DeleteButton onClick={() => void mutate("deleteRow", { table: "territories", id: territory.id })} />
+              </Actions>
+            </tr>
+          );
+        })}
+      </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+    </Panel>
+  );
+}
+
+function RoundsPanel({
+  data,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const controls = useListControls({
+    items: data.rounds,
+    searchText: (round) => `${round.year} ${round.name}`,
+  });
+
+  return (
+    <Panel title="Vueltas" description="Abre una vuelta para registrar el avance y conserva las anteriores como historial." action={<AddButton onClick={() => setModal({ type: "round" })}>Vuelta</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por ano o nombre..." query={controls.query} />
+      <DataTable headers={["Ano", "Vuelta", "Estado", "Manzanas", "Acciones"]}>
+        {controls.paged.map((round) => (
+          <tr key={round.id}><Cell>{round.year}</Cell><Cell><strong>{round.name}</strong></Cell><Cell><Badge className={round.status === "OPEN" ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200" : "border-slate-400/25 bg-slate-500/10 text-slate-300"}>{round.status === "OPEN" ? "Abierta" : "Cerrada"}</Badge></Cell><Cell>{data.blockStatuses.filter((item) => item.annual_round_id === round.id).length}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "round", item: round })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "annual_rounds", id: round.id })} /></Actions></tr>
+        ))}
+      </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+    </Panel>
+  );
+}
+
+function DeparturePointsPanel({
+  data,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const controls = useListControls({
+    items: data.departurePoints,
+    searchText: (point) => `${point.name} ${point.address}`,
+  });
+
+  return (
+    <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los territorios asociados son los mas cercanos a esa zona, en orden — el generador automatico de Salidas semanales los usa para elegir bien." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por nombre o direccion..." query={controls.query} />
+      <DataTable headers={["Nombre", "Direccion", "Territorios cercanos (de mas a menos)", "Acciones"]}>
+        {controls.paged.map((point) => {
+          const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
+          return (
+            <tr key={point.id}>
+              <Cell><strong>{point.name}</strong></Cell>
+              <Cell>{point.address}</Cell>
+              <Cell>
+                {territories.length ? (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {territories.map((entry, index) => (
+                      <span className="inline-flex items-center gap-1" key={entry.territory_id}>
+                        <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200">#{entry.territories?.number ?? "?"}</span>
+                        {index < territories.length - 1 ? <span className="text-slate-600">&rarr;</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-slate-500">Sin asociar</span>
+                )}
+              </Cell>
+              <Actions>
+                <IconButton label="Editar" onClick={() => setModal({ type: "departurePoint", item: point })}><Edit3 size={16} /></IconButton>
+                <DeleteButton onClick={() => void mutate("deleteRow", { table: "departure_points", id: point.id })} />
+              </Actions>
+            </tr>
+          );
+        })}
+      </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+    </Panel>
+  );
+}
+
+function GroupsPanel({
+  data,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const controls = useListControls({ items: data.groups, searchText: (group) => group.name });
+
+  return (
+    <Panel title="Grupos" description="Administra los grupos disponibles." action={<AddButton onClick={() => setModal({ type: "group" })}>Grupo</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar grupo..." query={controls.query} />
+      <DataTable headers={["Grupo", "Activo", "Acciones"]}>
+        {controls.paged.map((group) => <tr key={group.id}><Cell><strong>{group.name}</strong></Cell><Cell>{group.active ? "Si" : "No"}</Cell><Actions><IconButton label="Editar" onClick={() => setModal({ type: "group", item: group })}><Edit3 size={16} /></IconButton><DeleteButton onClick={() => void mutate("deleteRow", { table: "groups", id: group.id })} /></Actions></tr>)}
+      </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+    </Panel>
+  );
+}
+
+function UsersPanel({
+  data,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const controls = useListControls({
+    items: data.profiles,
+    searchText: (item) => `${item.username} ${item.full_name} ${item.groups?.name ?? ""}`,
+  });
 
   return (
     <Panel title="Usuarios" description="Asigna cada anciano a su grupo." action={<AddButton onClick={() => setModal({ type: "user" })}>Usuario</AddButton>}>
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por usuario, nombre o grupo..." query={controls.query} />
       <DataTable headers={["Usuario", "Nombre", "Grupo", "Rol", "Activo", "Estado", "Acciones"]}>
-        {data.profiles.map((item) => (
+        {controls.paged.map((item) => (
           <tr key={item.id}>
             <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.groups?.name ?? "-"}</Cell>
             <Cell>
@@ -1212,6 +1328,7 @@ function AdminView({
           </tr>
         ))}
       </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
     </Panel>
   );
 }
@@ -1228,19 +1345,21 @@ function ReservationCollection({
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
   const relevantReservations = data.reservations.filter((reservation) => reservation.reserved_by_admin === blocked);
+  const controls = useListControls({
+    items: relevantReservations,
+    searchText: (reservation) => `${reservation.territories?.number ?? ""} ${reservation.groups?.name ?? ""} ${reservation.profiles?.full_name ?? ""} ${reservation.departure_location}`,
+    dateValue: (reservation) => reservation.service_date,
+  });
+
   const windows = [...data.reservationWindows]
-    .filter((window) => relevantReservations.some((reservation) => reservation.reservation_window_id === window.id))
+    .filter((window) => controls.filtered.some((reservation) => reservation.reservation_window_id === window.id))
     .sort((a, b) => new Date(b.booking_deadline).getTime() - new Date(a.booking_deadline).getTime());
 
-  if (!windows.length) {
-    return (
-      <EmptyState
-        icon={blocked ? <ShieldCheck size={24} /> : <CalendarClock size={24} />}
-        title={blocked ? "No hay bloqueos registrados" : "No hay reservas registradas"}
-        text={blocked ? "Los territorios bloqueados administrativamente aparecerán agrupados por ventana." : "Las respuestas de los grupos aparecerán aquí, organizadas por ventana."}
-      />
-    );
-  }
+  const WINDOWS_PER_PAGE = 5;
+  const [windowPage, setWindowPage] = useState(1);
+  const totalWindowPages = Math.max(1, Math.ceil(windows.length / WINDOWS_PER_PAGE));
+  const clampedWindowPage = Math.min(windowPage, totalWindowPages);
+  const pagedWindows = windows.slice((clampedWindowPage - 1) * WINDOWS_PER_PAGE, clampedWindowPage * WINDOWS_PER_PAGE);
 
   return (
     <section className="space-y-4" aria-label={blocked ? "Bloqueos por ventana" : "Reservas por ventana"}>
@@ -1251,8 +1370,28 @@ function ReservationCollection({
         </p>
       </div>
 
-      {windows.map((window) => {
-        const windowReservations = relevantReservations
+      <ListToolbar
+        dateFrom={controls.dateFrom}
+        dateTo={controls.dateTo}
+        onDateFromChange={controls.setDateFrom}
+        onDateToChange={controls.setDateTo}
+        onQueryChange={(value) => { controls.setQuery(value); setWindowPage(1); }}
+        onQuickRange={(days) => { controls.setQuickRange(days); setWindowPage(1); }}
+        placeholder="Buscar por territorio, grupo o responsable..."
+        query={controls.query}
+        showDateFilter
+      />
+
+      {!windows.length ? (
+        <EmptyState
+          icon={blocked ? <ShieldCheck size={24} /> : <CalendarClock size={24} />}
+          title={blocked ? "No hay bloqueos registrados" : "No hay reservas registradas"}
+          text={blocked ? "Los territorios bloqueados administrativamente aparecerán agrupados por ventana." : "Las respuestas de los grupos aparecerán aquí, organizadas por ventana."}
+        />
+      ) : null}
+
+      {pagedWindows.map((window) => {
+        const windowReservations = controls.filtered
           .filter((reservation) => reservation.reservation_window_id === window.id)
           .sort((a, b) => a.service_date.localeCompare(b.service_date) || Number(a.territories?.number ?? 0) - Number(b.territories?.number ?? 0));
         return (
@@ -1324,6 +1463,7 @@ function ReservationCollection({
           </article>
         );
       })}
+      <PaginationBar onPageChange={setWindowPage} page={clampedWindowPage} pageSize={WINDOWS_PER_PAGE} total={windows.length} totalPages={totalWindowPages} />
     </section>
   );
 }
@@ -1762,11 +1902,17 @@ function S13Panel({
   const sortedRounds = [...data.territoryRounds].sort(
     (a, b) => (a.territories?.number ?? 0) - (b.territories?.number ?? 0) || b.assigned_on.localeCompare(a.assigned_on),
   );
+  const controls = useListControls({
+    items: sortedRounds,
+    searchText: (round) => `${round.territories?.number ?? ""} ${round.profiles?.full_name ?? ""}`,
+    dateValue: (round) => round.assigned_on,
+  });
 
   return (
     <Panel title="Registro S-13" description="Historial de asignaciones por territorio: quien lo tiene, desde cuando, y que falta. Editar o borrar actua sobre la ultima visita registrada; el estado se recalcula solo.">
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por territorio o conductor..." query={controls.query} showDateFilter dateFrom={controls.dateFrom} dateTo={controls.dateTo} onDateFromChange={controls.setDateFrom} onDateToChange={controls.setDateTo} onQuickRange={controls.setQuickRange} />
       <DataTable headers={["Territorio", "Conductor", "Asignado", "Estado", "Manzanas", "Acciones"]}>
-        {sortedRounds.map((round) => {
+        {controls.paged.map((round) => {
           const latestVisit = latestVisitByRound.get(round.id);
           return (
             <tr key={round.id}>
@@ -1793,6 +1939,7 @@ function S13Panel({
           );
         })}
       </DataTable>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
     </Panel>
   );
 }
@@ -1977,6 +2124,11 @@ function WeekendRosterPanel({
   const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
   const sortedRoster = [...data.weekendRoster].sort((a, b) => a.service_date.localeCompare(b.service_date));
   const conductorOptions = [{ value: "", label: "Sin asignar" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))];
+  const controls = useListControls({
+    items: sortedRoster,
+    searchText: (entry) => entry.profiles?.full_name ?? "",
+    dateValue: (entry) => entry.service_date,
+  });
 
   const [adding, setAdding] = useState(false);
   const [newDate, setNewDate] = useState("");
@@ -2001,6 +2153,7 @@ function WeekendRosterPanel({
       description="Vos armas la lista: agrega cada sabado o domingo con su conductor. Se sugiere solo en las filas de Salidas semanales de ese dia."
       action={<AddButton onClick={startAdding}>Fecha</AddButton>}
     >
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar conductor..." query={controls.query} showDateFilter dateFrom={controls.dateFrom} dateTo={controls.dateTo} onDateFromChange={controls.setDateFrom} onDateToChange={controls.setDateTo} onQuickRange={controls.setQuickRange} />
       <div className="space-y-2">
         {adding ? (
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-3.5 py-3">
@@ -2020,7 +2173,7 @@ function WeekendRosterPanel({
           </div>
         ) : null}
 
-        {sortedRoster.map((entry) => {
+        {controls.paged.map((entry) => {
           const isSaturday = new Date(`${entry.service_date}T00:00:00Z`).getUTCDay() === 6;
           return (
             <div className="flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.02] px-3.5 py-3" key={entry.id}>
@@ -2043,6 +2196,7 @@ function WeekendRosterPanel({
 
         {!sortedRoster.length && !adding ? <EmptyState icon={<Users size={24} />} title="Todavia no hay conductores cargados" text="Agrega una fecha para empezar la lista." /> : null}
       </div>
+      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
     </Panel>
   );
 }
