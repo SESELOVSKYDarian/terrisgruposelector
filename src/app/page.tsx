@@ -1802,9 +1802,11 @@ function WeekendRosterPanel({
     const diffToSaturday = (6 - cursor.getUTCDay() + 7) % 7;
     cursor.setUTCDate(cursor.getUTCDate() + diffToSaturday);
     const dates: string[] = [];
-    for (let i = 0; i < 10; i += 1) {
+    for (let week = 0; week < 5; week += 1) {
       dates.push(cursor.toISOString().slice(0, 10));
       cursor.setUTCDate(cursor.getUTCDate() + 1);
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 6);
     }
     return dates;
   }, []);
