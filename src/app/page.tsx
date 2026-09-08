@@ -7,7 +7,6 @@ import {
   Bell,
   CalendarClock,
   CalendarDays,
-  Check,
   CheckCircle2,
   Copy,
   Edit3,
@@ -268,7 +267,6 @@ export default function Home() {
   const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
   const isConductor = Boolean(profile?.roles.includes("CONDUCTOR"));
   const openRound = data.rounds.find((round) => round.status === "OPEN");
-  const unreadCount = data.notifications.filter((notification) => !notification.read_at).length;
 
   const loadData = useCallback(async (options?: { throwOnError?: boolean }) => {
     setLoading(true);
@@ -323,8 +321,16 @@ export default function Home() {
     setData(emptyData);
   }
 
+  const silentActions = new Set([
+    "markNotificationRead",
+    "createWeeklyOuting",
+    "createWeeklyOutingSlot",
+    "updateWeeklyOutingSlot",
+    "setSlotTerritories",
+  ]);
+
   function requestConfirmation(action: string) {
-    if (action === "markNotificationRead") return Promise.resolve(true);
+    if (silentActions.has(action)) return Promise.resolve(true);
     const deleting = action.startsWith("delete");
     return new Promise<boolean>((resolve) => {
       setPendingConfirmation({
@@ -410,15 +416,14 @@ export default function Home() {
             <AdminNav
               activeView={activeView}
               currentUser={profile}
-              unreadCount={unreadCount}
               onChange={setActiveView}
               onLogout={logout}
             />
             <div className="min-w-0 space-y-3">
               <AdminTopbar
                 activeView={activeView}
-                unreadCount={unreadCount}
-                onNotifications={() => setActiveView("notifications")}
+                data={data}
+                mutate={mutate}
               />
               <div className="view-transition min-w-0" key={activeView}>
                 <AdminView
@@ -539,29 +544,41 @@ export default function Home() {
 function AdminNav({
   activeView,
   currentUser,
-  unreadCount,
   onChange,
   onLogout,
 }: {
   activeView: string;
   currentUser: Profile;
-  unreadCount: number;
   onChange: (view: string) => void;
   onLogout: () => void;
 }) {
-  const tabs: Array<{ id: string; label: string; icon: ReactNode }> = [
-    { id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> },
-    { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
-    { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
-    { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
-    { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
-    { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
-    { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
-    { id: "notifications", label: `Avisos${unreadCount ? ` (${unreadCount})` : ""}`, icon: <Bell size={17} /> },
-    { id: "groups", label: "Grupos", icon: <Users size={17} /> },
-    { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
+  const tabGroups: Array<{ label: string; items: Array<{ id: string; label: string; icon: ReactNode }> }> = [
+    { label: "", items: [{ id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> }] },
+    {
+      label: "Reservas",
+      items: [
+        { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
+        { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
+        { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
+      ],
+    },
+    {
+      label: "Territorios",
+      items: [
+        { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
+        { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
+        { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
+      ],
+    },
+    {
+      label: "Cuentas",
+      items: [
+        { id: "groups", label: "Grupos", icon: <Users size={17} /> },
+        { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
+      ],
+    },
     ...(currentUser.roles.includes("CONDUCTOR")
-      ? [{ id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> }]
+      ? [{ label: "Tu rol", items: [{ id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> }] }]
       : []),
   ];
   const initials = currentUser.full_name
@@ -583,12 +600,17 @@ function AdminNav({
         </div>
       </div>
 
-      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0" aria-label="Secciones">
-        {tabs.map(({ id, label, icon }) => (
-          <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
-            <span className="shrink-0">{icon}</span>
-            <span className="admin-nav-label whitespace-nowrap">{label}</span>
-          </button>
+      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-3 lg:overflow-visible lg:pb-0" aria-label="Secciones">
+        {tabGroups.map((group, index) => (
+          <div className="lg:space-y-1" key={group.label || `group-${index}`}>
+            {group.label ? <p className="admin-nav-label hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 lg:block">{group.label}</p> : null}
+            {group.items.map(({ id, label, icon }) => (
+              <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
+                <span className="shrink-0">{icon}</span>
+                <span className="admin-nav-label whitespace-nowrap">{label}</span>
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 
@@ -610,19 +632,18 @@ function AdminNav({
 
 function AdminTopbar({
   activeView,
-  unreadCount,
-  onNotifications,
+  data,
+  mutate,
 }: {
   activeView: string;
-  unreadCount: number;
-  onNotifications: () => void;
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
   const sectionLabels: Record<string, string> = {
     dashboard: "Resumen",
     windows: "Ventanas",
     reservations: "Reservas",
     blocks: "Bloqueos",
-    notifications: "Avisos",
     territories: "Territorios",
     rounds: "Vueltas",
     outings: "Salidas semanales",
@@ -632,24 +653,76 @@ function AdminTopbar({
   };
   return (
     <header className="glass-panel flex min-h-16 items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
-      <button
-        className={cn(
-          "relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-          activeView === "notifications"
-            ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
-            : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
-        )}
-        onClick={onNotifications}
-        type="button"
-        aria-label={unreadCount ? `Avisos, ${unreadCount} sin leer` : "Avisos"}
-      >
-        <Bell size={18} aria-hidden="true" />
-        {unreadCount ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}
-      </button>
+      <NotificationsBell data={data} mutate={mutate} />
       <div className="min-w-0">
         <h1 className="truncate text-lg font-semibold tracking-tight text-white">{sectionLabels[activeView] ?? "Administración"}</h1>
       </div>
     </header>
+  );
+}
+
+function NotificationsBell({
+  data,
+  mutate,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const [open, setOpen] = useState(false);
+  const notifications = data.notifications;
+  const unread = notifications.filter((item) => !item.read_at);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        className={cn(
+          "relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          open
+            ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
+            : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+        )}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+        aria-expanded={open}
+        aria-label={unread.length ? `Avisos, ${unread.length} sin leer` : "Avisos"}
+      >
+        <Bell size={18} aria-hidden="true" />
+        {unread.length ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unread.length > 99 ? "99+" : unread.length}</span> : null}
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1615] shadow-2xl sm:left-auto sm:right-0">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+              <p className="text-sm font-semibold text-white">Avisos</p>
+              {unread.length ? (
+                <button className="text-xs font-semibold text-teal-300 hover:text-teal-200" onClick={() => void mutate("markNotificationRead")} type="button">
+                  Marcar todos
+                </button>
+              ) : null}
+            </div>
+            <div className="max-h-[60vh] divide-y divide-white/8 overflow-y-auto">
+              {notifications.length ? notifications.map((notification) => (
+                <button
+                  className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-white/[0.03]"
+                  key={notification.id}
+                  onClick={() => (!notification.read_at ? void mutate("markNotificationRead", { id: notification.id }) : undefined)}
+                  type="button"
+                >
+                  <span className={cn("mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full", notification.read_at ? "bg-transparent" : "bg-sky-400")} aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className={cn("block text-sm", !notification.read_at && "font-semibold text-white")}>{notification.message}</span>
+                    <span className="mt-1 block text-xs text-slate-500">{displayDateTime(notification.created_at)}</span>
+                  </span>
+                </button>
+              )) : (
+                <p className="px-4 py-6 text-center text-sm text-slate-400">Todavia no hay avisos.</p>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -758,7 +831,7 @@ function AdminView({
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
   if (activeView === "dashboard") {
-    return <AdminDashboard data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} />;
+    return <AdminDashboard data={data} />;
   }
 
   if (activeView === "windows") {
@@ -801,31 +874,6 @@ function AdminView({
 
   if (activeView === "blocks") {
     return <ReservationCollection data={data} blocked setModal={setModal} mutate={mutate} />;
-  }
-
-  if (activeView === "notifications") {
-    return (
-      <Panel
-        title="Avisos"
-        description="Confirmaciones recibidas al completar una reserva."
-        action={data.notifications.some((item) => !item.read_at) ? <button className={secondaryButtonClass} onClick={() => void mutate("markNotificationRead")} type="button"><Check size={17} />Marcar leidos</button> : null}
-      >
-        <div className="divide-y divide-white/10">
-          {data.notifications.map((notification) => (
-            <div className="flex gap-3 py-4 first:pt-0 last:pb-0" key={notification.id}>
-              <span className={cn("mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", notification.read_at ? "border-white/10 bg-slate-800 text-slate-400" : "border-sky-400/20 bg-sky-500/12 text-sky-300")}>
-                <Bell size={17} />
-              </span>
-              <div className="min-w-0">
-                <p className={cn("text-sm", !notification.read_at && "font-semibold")}>{notification.message}</p>
-                <p className="mt-1 text-xs text-slate-400">{displayDateTime(notification.created_at)}</p>
-              </div>
-            </div>
-          ))}
-          {!data.notifications.length ? <p className="py-6 text-center text-sm text-slate-400">Todavia no hay avisos.</p> : null}
-        </div>
-      </Panel>
-    );
   }
 
   if (activeView === "territories") {
@@ -1039,63 +1087,7 @@ function ReservationCollection({
   );
 }
 
-function getTerritoryCompletionHistory(data: AppData) {
-  const blockTotals = new Map<string, number>();
-  for (const block of data.blocks) {
-    blockTotals.set(block.territory_id, (blockTotals.get(block.territory_id) ?? 0) + 1);
-  }
-
-  const grouped = new Map<string, {
-    territoryId: string;
-    roundId: string;
-    territoryNumber: number | string;
-    territoryName: string;
-    completedBlocks: Set<string>;
-    updatedAt: string;
-  }>();
-
-  for (const status of data.blockStatuses) {
-    if (status.status !== "COMPLETED" || !status.blocks?.territory_id || !status.updated_at) continue;
-    const territoryId = status.blocks.territory_id;
-    const key = `${status.annual_round_id}:${territoryId}`;
-    const current = grouped.get(key) ?? {
-      territoryId,
-      roundId: status.annual_round_id,
-      territoryNumber: status.blocks.territories?.number ?? "?",
-      territoryName: status.blocks.territories?.name ?? `Territorio ${status.blocks.territories?.number ?? ""}`.trim(),
-      completedBlocks: new Set<string>(),
-      updatedAt: status.updated_at,
-    };
-    current.completedBlocks.add(status.block_id);
-    if (new Date(status.updated_at).getTime() > new Date(current.updatedAt).getTime()) current.updatedAt = status.updated_at;
-    grouped.set(key, current);
-  }
-
-  const roundMap = new Map(data.rounds.map((round) => [round.id, round]));
-
-  return [...grouped.values()]
-    .filter((entry) => {
-      const totalBlocks = blockTotals.get(entry.territoryId) ?? 0;
-      return totalBlocks > 0 && entry.completedBlocks.size === totalBlocks;
-    })
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .map((entry) => ({
-      ...entry,
-      round: roundMap.get(entry.roundId),
-    }));
-}
-
-function AdminDashboard({
-  data,
-  loadedAt,
-  openRound,
-  setModal,
-}: {
-  data: AppData;
-  loadedAt: number;
-  openRound?: Round;
-  setModal: (modal: ModalState) => void;
-}) {
+function AdminDashboard({ data }: { data: AppData }) {
   const activeWindows = data.reservationWindows.filter((item) => item.active);
   const blockedReservations = data.reservations.filter((item) => item.reserved_by_admin && item.status === "ACTIVE");
   const answeredReservations = data.reservations.filter((item) => !item.reserved_by_admin && item.status === "ACTIVE");
@@ -1105,125 +1097,39 @@ function AdminDashboard({
   const completionRate = territoriesWithBlocks ? Math.round((completedTerritories / territoriesWithBlocks) * 100) : 0;
   const respondingGroups = new Set(answeredReservations.map((item) => item.group_id).filter(Boolean)).size;
   const unreadNotifications = data.notifications.filter((item) => !item.read_at).length;
-  const completionHistory = getTerritoryCompletionHistory(data).slice(0, 6);
-  const windowsHistory = [...data.reservationWindows]
-    .sort((a, b) => new Date(b.booking_deadline).getTime() - new Date(a.booking_deadline).getTime())
-    .slice(0, 6);
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-        <Metric
-          icon={<MapIcon size={20} />}
-          label="Avance de la vuelta"
-          value={`${completionRate}%`}
-          detail={`${completedTerritories} completos · ${territoriesInProgress} en curso`}
-          progress={completionRate}
-          tone="sky"
-        />
-        <Metric
-          icon={<CalendarDays size={20} />}
-          label="Reservas activas"
-          value={answeredReservations.length}
-          detail={`${respondingGroups} ${respondingGroups === 1 ? "grupo respondió" : "grupos respondieron"}`}
-          tone="emerald"
-        />
-        <Metric
-          icon={<ShieldCheck size={20} />}
-          label="Bloqueos vigentes"
-          value={blockedReservations.length}
-          detail={`${activeWindows.length} ${activeWindows.length === 1 ? "ventana activa" : "ventanas activas"}`}
-          tone="amber"
-        />
-        <Metric
-          icon={<Bell size={20} />}
-          label="Avisos pendientes"
-          value={unreadNotifications}
-          detail={unreadNotifications ? "Requieren revisión" : "Todo está al día"}
-          tone="rose"
-        />
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-[1.25fr_0.95fr]">
-        <Panel
-          title="Ventanas recientes"
-          description="Un vistazo rápido para entrar a bloquear, editar o revisar el estado de cada ventana."
-        >
-          <div className="grid gap-3 lg:grid-cols-2">
-            {windowsHistory.map((window) => {
-              const expired = new Date(window.booking_deadline).getTime() < loadedAt;
-              const blocked = data.reservations.filter((item) => item.reservation_window_id === window.id && item.reserved_by_admin && item.status === "ACTIVE").length;
-              const answered = data.reservations.filter((item) => item.reservation_window_id === window.id && !item.reserved_by_admin && item.status === "ACTIVE").length;
-              const dates = [window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" · ");
-              return (
-                <article className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4" key={window.id}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{window.name}</p>
-                      <p className="mt-1 text-sm text-slate-400">{dates || "Sin fechas"}</p>
-                    </div>
-                    <Badge className={!window.active || expired ? "border-slate-500/30 bg-slate-500/10 text-slate-300" : "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"}>
-                      {!window.active ? "Inactiva" : expired ? "Cerrada" : "Abierta"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <DashboardKpi label="Ancianos" value={answered} />
-                    <DashboardKpi label="Bloqueados" value={blocked} />
-                  </div>
-                  <p className="mt-4 text-xs uppercase tracking-[0.14em] text-slate-500">
-                    Limite {displayDateTime(window.booking_deadline)}
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button className={secondaryButtonClass} onClick={() => setModal({ type: "adminReservation", window })} type="button">
-                      <ShieldCheck size={16} />Bloquear
-                    </button>
-                    <button className={secondaryButtonClass} onClick={() => setModal({ type: "window", item: window })} type="button">
-                      <Edit3 size={16} />Editar
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </Panel>
-
-        <Panel
-          title="Estado de la vuelta"
-          description="Resumen breve del avance actual y de los últimos territorios completados."
-        >
-          <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
-            <p className="text-sm font-medium text-slate-400">Vuelta abierta</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{openRound?.name ?? "Sin vuelta abierta"}</p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <DashboardKpi label="Ventanas activas" value={activeWindows.length} />
-              <DashboardKpi label="Territorios completos" value={completedTerritories} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            {completionHistory.length ? completionHistory.map((entry) => (
-              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-3" key={`${entry.roundId}-${entry.territoryId}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-white">Territorio #{entry.territoryNumber}</p>
-                    <p className="mt-1 text-sm text-slate-400">{entry.round?.name ?? "Vuelta"} · {displayDateTime(entry.updatedAt)}</p>
-                  </div>
-                  <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Completo</Badge>
-                </div>
-              </div>
-            )) : <p className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-5 text-sm text-slate-400">Todavia no hay territorios completados registrados.</p>}
-          </div>
-        </Panel>
-      </section>
-    </div>
-  );
-}
-
-function DashboardKpi({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-white">{value}</p>
-    </div>
+    <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+      <Metric
+        icon={<MapIcon size={20} />}
+        label="Avance de la vuelta"
+        value={`${completionRate}%`}
+        detail={`${completedTerritories} completos · ${territoriesInProgress} en curso`}
+        progress={completionRate}
+        tone="sky"
+      />
+      <Metric
+        icon={<CalendarDays size={20} />}
+        label="Reservas activas"
+        value={answeredReservations.length}
+        detail={`${respondingGroups} ${respondingGroups === 1 ? "grupo respondió" : "grupos respondieron"}`}
+        tone="emerald"
+      />
+      <Metric
+        icon={<ShieldCheck size={20} />}
+        label="Bloqueos vigentes"
+        value={blockedReservations.length}
+        detail={`${activeWindows.length} ${activeWindows.length === 1 ? "ventana activa" : "ventanas activas"}`}
+        tone="amber"
+      />
+      <Metric
+        icon={<Bell size={20} />}
+        label="Avisos pendientes"
+        value={unreadNotifications}
+        detail={unreadNotifications ? "Requieren revisión" : "Todo está al día"}
+        tone="rose"
+      />
+    </section>
   );
 }
 
@@ -1684,46 +1590,70 @@ function WeeklyOutingSlotRow({
   striped: boolean;
 }) {
   const [territoryModalOpen, setTerritoryModalOpen] = useState(false);
+  const [hora, setHora] = useState(slot.hora ?? "");
+  const [lugar, setLugar] = useState(slot.lugar ?? "");
+  const [conductorId, setConductorId] = useState(slot.conductor_id ?? "");
+  const [highlighted, setHighlighted] = useState(slot.highlighted);
+
+  useEffect(() => {
+    setHora(slot.hora ?? "");
+    setLugar(slot.lugar ?? "");
+    setConductorId(slot.conductor_id ?? "");
+    setHighlighted(slot.highlighted);
+  }, [slot.id, slot.hora, slot.lugar, slot.conductor_id, slot.highlighted]);
+
+  const dirty = hora !== (slot.hora ?? "") || lugar !== (slot.lugar ?? "") || conductorId !== (slot.conductor_id ?? "") || highlighted !== slot.highlighted;
+
   const territoryText = [...slot.weekly_outing_slot_territories]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((entry) => {
-      if (entry.display_override) return entry.display_override;
       const number = entry.territories?.number ?? "?";
       const pending = entry.territory_rounds?.pending_block_labels ?? [];
       return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
     })
-    .join("+");
+    .join(" + ");
+
+  function save() {
+    void mutate("updateWeeklyOutingSlot", {
+      id: slot.id,
+      hora: hora || null,
+      lugar: lugar || null,
+      conductor_id: conductorId || null,
+      highlighted,
+    });
+  }
 
   return (
-    <div className={cn("grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[110px_1fr_1fr_1fr_auto] sm:items-center", slot.highlighted ? "border-l-2 border-teal-300/25 bg-teal-400/[0.06]" : striped ? "bg-white/[0.02]" : "")}>
-      <input
-        className={compactSelectClass}
-        defaultValue={slot.hora ?? ""}
-        onBlur={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, hora: event.target.value })}
-        type="time"
-      />
-      <select
-        className={compactSelectClass}
-        defaultValue={slot.conductor_id ?? ""}
-        onChange={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, conductor_id: event.target.value || null })}
-      >
-        <option value="">Sin conductor</option>
-        {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
-      </select>
-      <input
-        className={compactSelectClass}
-        defaultValue={slot.lugar ?? ""}
-        onBlur={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, lugar: event.target.value })}
-        placeholder="Lugar"
-      />
-      <button className={cn(compactSelectClass, "text-left")} onClick={() => setTerritoryModalOpen(true)} type="button">
-        {territoryText || "Elegir territorios"}
-      </button>
-      <div className="flex items-center gap-1.5 justify-self-end">
+    <div className={cn("grid grid-cols-2 gap-x-2.5 gap-y-2 px-4 py-3 sm:grid-cols-[96px_1fr_1fr_1fr_auto] sm:items-center", slot.highlighted ? "border-l-2 border-teal-300/25 bg-teal-400/[0.06]" : striped ? "bg-white/[0.02]" : "")}>
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Hora</span>
+        <input className={compactSelectClass + " w-full"} onChange={(event) => setHora(event.target.value)} type="time" value={hora} />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Conductor</span>
+        <select className={compactSelectClass + " w-full"} onChange={(event) => setConductorId(event.target.value)} value={conductorId}>
+          <option value="">Sin conductor</option>
+          {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Lugar</span>
+        <input className={compactSelectClass + " w-full"} onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
+      </label>
+      <div>
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Territorios</span>
+        <button className={cn(compactSelectClass, "w-full text-left")} onClick={() => setTerritoryModalOpen(true)} type="button">
+          {territoryText || <span className="text-slate-500">Elegir territorios</span>}
+        </button>
+      </div>
+      <div className="col-span-2 flex items-center justify-between gap-2 sm:col-span-1 sm:justify-self-end">
         <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
-          <input checked={slot.highlighted} className="h-3.5 w-3.5 accent-teal-300" onChange={(event) => void mutate("updateWeeklyOutingSlot", { id: slot.id, highlighted: event.target.checked })} type="checkbox" />
+          <input checked={highlighted} className="h-3.5 w-3.5 accent-teal-300" onChange={(event) => setHighlighted(event.target.checked)} type="checkbox" />
           Destacar
         </label>
+        <button className={cn(miniButtonClass, dirty && "border-teal-300/40 bg-teal-400/12 text-teal-100")} disabled={!dirty} onClick={save} type="button">
+          <Save size={13} aria-hidden="true" />{dirty ? "Guardar" : "Guardado"}
+        </button>
         <DeleteButton onClick={() => void mutate("deleteWeeklyOutingSlot", { id: slot.id })} />
       </div>
       {territoryModalOpen ? (
@@ -1744,79 +1674,73 @@ function SlotTerritoryModal({
   onClose: () => void;
   slot: WeeklyOutingSlot;
 }) {
-  const [entries, setEntries] = useState(
-    [...slot.weekly_outing_slot_territories]
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((entry) => ({
-        territory_id: entry.territory_id,
-        territory_round_id: entry.territory_round_id,
-        display_override: entry.display_override ?? "",
-      })),
+  const openRoundByTerritory = useMemo(
+    () => new Map(data.territoryRounds.filter((round) => !round.completed_on).map((round) => [round.territory_id, round])),
+    [data.territoryRounds],
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(slot.weekly_outing_slot_territories.map((entry) => entry.territory_id)),
   );
 
-  function addEntry() {
-    const first = data.territories[0];
-    if (!first) return;
-    setEntries((current) => [...current, { territory_id: first.id, territory_round_id: null, display_override: "" }]);
-  }
-
-  function updateEntry(index: number, patch: Partial<(typeof entries)[number]>) {
-    setEntries((current) => current.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
-  }
-
-  function removeEntry(index: number) {
-    setEntries((current) => current.filter((_, i) => i !== index));
+  function toggle(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function save() {
-    const result = await mutate("setSlotTerritories", {
-      slot_id: slot.id,
-      territories: entries.map((entry) => ({
-        territory_id: entry.territory_id,
-        territory_round_id: entry.territory_round_id || null,
-        display_override: entry.display_override || null,
-      })),
-    });
+    const territories = [...selectedIds]
+      .sort((a, b) => (data.territories.find((item) => item.id === a)?.number ?? 0) - (data.territories.find((item) => item.id === b)?.number ?? 0))
+      .map((territoryId) => ({
+        territory_id: territoryId,
+        territory_round_id: openRoundByTerritory.get(territoryId)?.id ?? null,
+        display_override: null,
+      }));
+    const result = await mutate("setSlotTerritories", { slot_id: slot.id, territories });
     if (result) onClose();
   }
 
   return (
-    <div className="modal-overlay fixed inset-0 z-[75] col-span-full grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal-overlay fixed inset-0 z-[75] grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-white/10 p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
-          <h2 className="text-xl font-semibold tracking-tight text-white">Territorios de la fila</h2>
-          <button className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl text-slate-400 hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} /></button>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-white">Territorios de la fila</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-400">El texto se arma solo con las manzanas que faltan de la vuelta abierta de cada territorio.</p>
+          </div>
+          <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} /></button>
         </div>
-        <p className="mt-2 text-sm leading-6 text-slate-400">Podes elegir cualquier territorio y, si corresponde, una vuelta especifica del historial. El texto se autocompleta con las manzanas pendientes; podes editarlo a mano.</p>
 
-        <div className="mt-4 space-y-3">
-          {entries.map((entry, index) => {
-            const roundsForTerritory = data.territoryRounds.filter((round) => round.territory_id === entry.territory_id);
+        <div className="mt-4 grid max-h-[22rem] gap-2 overflow-y-auto rounded-[1.35rem] border border-white/8 bg-black/20 p-2">
+          {[...data.territories].sort((a, b) => a.number - b.number).map((territory) => {
+            const round = openRoundByTerritory.get(territory.id);
+            const selected = selectedIds.has(territory.id);
             return (
-              <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-3" key={index}>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <select className={inputClass} onChange={(event) => updateEntry(index, { territory_id: event.target.value, territory_round_id: null })} value={entry.territory_id}>
-                    {data.territories.map((territory) => <option key={territory.id} value={territory.id}>Territorio #{territory.number}</option>)}
-                  </select>
-                  <select className={inputClass} onChange={(event) => updateEntry(index, { territory_round_id: event.target.value || null })} value={entry.territory_round_id ?? ""}>
-                    <option value="">Vuelta abierta mas reciente</option>
-                    {roundsForTerritory.map((round) => (
-                      <option key={round.id} value={round.id}>
-                        {round.completed_on ? "Cerrada" : "Abierta"} - {displayDate(round.assigned_on)}{round.pending_block_labels.length ? ` - Faltan ${formatPendingBlocks(round.pending_block_labels)}` : ""}
-                      </option>
-                    ))}
-                  </select>
+              <label
+                className={cn(
+                  "flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition",
+                  selected ? "border-teal-300/35 bg-teal-400/10 text-white" : "border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/14 hover:bg-white/[0.05]",
+                )}
+                key={territory.id}
+              >
+                <input checked={selected} className="h-4 w-4 accent-teal-300" onChange={() => toggle(territory.id)} type="checkbox" />
+                <div className="min-w-0">
+                  <p className="font-medium">Territorio #{territory.number}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {round?.pending_block_labels.length
+                      ? `Faltan ${formatPendingBlocks(round.pending_block_labels)}`
+                      : round
+                        ? "Vuelta abierta, sin manzanas pendientes cargadas"
+                        : "Sin vuelta abierta"}
+                  </p>
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <input className={inputClass + " mt-0"} onChange={(event) => updateEntry(index, { display_override: event.target.value })} placeholder="Texto manual (ej. 16Cont, 36*)" value={entry.display_override} />
-                  <DeleteButton onClick={() => removeEntry(index)} />
-                </div>
-              </div>
+              </label>
             );
           })}
         </div>
-
-        <button className={miniButtonClass + " mt-3"} onClick={addEntry} type="button"><Plus size={14} />Agregar territorio</button>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button className={secondaryButtonClass} onClick={onClose} type="button">Cancelar</button>
