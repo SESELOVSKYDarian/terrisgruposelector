@@ -1057,10 +1057,22 @@ export async function POST(request: Request) {
       const existingSlots = existingSlotsResult.data ?? [];
       const existingSlotIds = existingSlots.map((slot) => slot.id);
       const { data: existingSlotTerritories, error: slotTerritoriesError } = existingSlotIds.length
-        ? await supabase.from("weekly_outing_slot_territories").select("slot_id").in("slot_id", existingSlotIds)
+        ? await supabase.from("weekly_outing_slot_territories").select("slot_id,territory_id").in("slot_id", existingSlotIds)
         : { data: [], error: null };
       if (slotTerritoriesError) return fail(slotTerritoriesError.message);
       const slotsWithTerritory = new Set((existingSlotTerritories ?? []).map((entry) => entry.slot_id));
+
+      // territorios ya usados en CUALQUIER salida de esta semana (no solo las que se van a completar ahora)
+      const usedTerritoryIds = new Set((existingSlotTerritories ?? []).map((entry) => entry.territory_id));
+
+      const territoryToPointAddress = new Map<string, string>();
+      for (const point of departurePointsResult.data ?? []) {
+        for (const entry of point.departure_point_territories ?? []) {
+          if (!territoryToPointAddress.has(entry.territory_id) && activeTerritoryIds.has(entry.territory_id)) {
+            territoryToPointAddress.set(entry.territory_id, point.address);
+          }
+        }
+      }
 
       const startsOn = outing.starts_on;
       const days = Array.from({ length: 7 }, (_, index) => {
@@ -1069,12 +1081,12 @@ export async function POST(request: Request) {
         return date.toISOString().slice(0, 10);
       });
 
-      const targetSlots: { id: string; lugar: string | null }[] = [];
+      const targetSlots: { id: string; lugar: string | null; slot_date: string }[] = [];
       for (const day of days) {
         const daySlots = existingSlots.filter((slot) => slot.slot_date === day);
-        const emptySlot = daySlots.find((slot) => !slotsWithTerritory.has(slot.id));
-        if (emptySlot) {
-          targetSlots.push({ id: emptySlot.id, lugar: emptySlot.lugar });
+        const emptySlots = daySlots.filter((slot) => !slotsWithTerritory.has(slot.id));
+        if (emptySlots.length) {
+          for (const slot of emptySlots) targetSlots.push({ id: slot.id, lugar: slot.lugar, slot_date: day });
           continue;
         }
         if (daySlots.length === 0) {
@@ -1084,23 +1096,39 @@ export async function POST(request: Request) {
             .select("id,lugar")
             .single();
           if (error) return fail(error.message);
-          if (created) targetSlots.push({ id: created.id, lugar: created.lugar });
+          if (created) targetSlots.push({ id: created.id, lugar: created.lugar, slot_date: day });
         }
       }
 
-      const usedTerritoryIds = new Set<string>();
-      let pointer = 0;
-      function nextFromGlobalPriority() {
-        while (pointer < priorityTerritoryIds.length && usedTerritoryIds.has(priorityTerritoryIds[pointer])) pointer += 1;
-        return pointer < priorityTerritoryIds.length ? priorityTerritoryIds[pointer] : null;
+      function pickTerritory(avoidAddress: string | null): string | null {
+        let fallback: string | null = null;
+        for (const id of priorityTerritoryIds) {
+          if (usedTerritoryIds.has(id)) continue;
+          const address = territoryToPointAddress.get(id) ?? null;
+          if (!avoidAddress || !address || address !== avoidAddress) return id;
+          if (fallback === null) fallback = id;
+        }
+        return fallback;
       }
 
+      const lastAddressByDay = new Map<string, string>();
+
       for (const slot of targetSlots) {
-        const nearby = slot.lugar ? territoryIdsByAddress.get(slot.lugar.trim().toLowerCase()) : undefined;
-        const territoryId = nearby?.find((id) => !usedTerritoryIds.has(id)) ?? nextFromGlobalPriority();
+        const preAddressKey = slot.lugar ? slot.lugar.trim().toLowerCase() : null;
+        const nearby = preAddressKey ? territoryIdsByAddress.get(preAddressKey) : undefined;
+
+        const territoryId = nearby?.find((id) => !usedTerritoryIds.has(id))
+          ?? pickTerritory(preAddressKey ? null : lastAddressByDay.get(slot.slot_date) ?? null);
         if (!territoryId) break;
         usedTerritoryIds.add(territoryId);
-        if (!nearby?.includes(territoryId)) pointer += 1;
+
+        const resolvedLugar = slot.lugar || territoryToPointAddress.get(territoryId) || null;
+        if (resolvedLugar) lastAddressByDay.set(slot.slot_date, resolvedLugar);
+
+        if (!slot.lugar && resolvedLugar) {
+          const { error: slotUpdateError } = await supabase.from("weekly_outing_slots").update({ lugar: resolvedLugar }).eq("id", slot.id);
+          if (slotUpdateError) return fail(slotUpdateError.message);
+        }
 
         const { error } = await supabase.from("weekly_outing_slot_territories").insert({
           slot_id: slot.id,

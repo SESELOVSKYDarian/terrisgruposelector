@@ -1751,16 +1751,24 @@ function S13Panel({
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
   setModal: (modal: ModalState) => void;
 }) {
+  const latestVisitByRound = new Map<string, TerritoryVisit>();
+  for (const visit of data.territoryVisits) {
+    const current = latestVisitByRound.get(visit.territory_round_id);
+    if (!current || visit.visit_date > current.visit_date || (visit.visit_date === current.visit_date && visit.created_at > current.created_at)) {
+      latestVisitByRound.set(visit.territory_round_id, visit);
+    }
+  }
+
   const sortedRounds = [...data.territoryRounds].sort(
     (a, b) => (a.territories?.number ?? 0) - (b.territories?.number ?? 0) || b.assigned_on.localeCompare(a.assigned_on),
   );
-  const sortedVisits = [...data.territoryVisits].sort((a, b) => b.visit_date.localeCompare(a.visit_date) || b.created_at.localeCompare(a.created_at));
 
   return (
-    <div className="space-y-4">
-      <Panel title="Registro S-13" description="Historial de asignaciones por territorio: quien lo tiene, desde cuando, y que falta.">
-        <DataTable headers={["Territorio", "Conductor", "Asignado", "Estado", "Manzanas"]}>
-          {sortedRounds.map((round) => (
+    <Panel title="Registro S-13" description="Historial de asignaciones por territorio: quien lo tiene, desde cuando, y que falta. Editar o borrar actua sobre la ultima visita registrada; el estado se recalcula solo.">
+      <DataTable headers={["Territorio", "Conductor", "Asignado", "Estado", "Manzanas", "Acciones"]}>
+        {sortedRounds.map((round) => {
+          const latestVisit = latestVisitByRound.get(round.id);
+          return (
             <tr key={round.id}>
               <Cell><strong>Territorio #{round.territories?.number ?? "?"}</strong></Cell>
               <Cell>{round.profiles?.full_name ?? "-"}</Cell>
@@ -1773,29 +1781,19 @@ function S13Panel({
                 )}
               </Cell>
               <Cell>{round.pending_block_labels.length ? `Faltan ${formatPendingBlocks(round.pending_block_labels)}` : "Completo"}</Cell>
-            </tr>
-          ))}
-        </DataTable>
-      </Panel>
-
-      <Panel title="Visitas registradas" description="Cada envio del formulario de conductor. Los conductores no pueden editar ni borrar sus envios; el administrador si, y el S-13 de arriba se actualiza solo.">
-        <DataTable headers={["Territorio", "Conductor", "Fecha", "Hechas", "Pendientes", "Acciones"]}>
-          {sortedVisits.map((visit) => (
-            <tr key={visit.id}>
-              <Cell>Territorio #{visit.territory_rounds?.territories?.number ?? "?"}</Cell>
-              <Cell>{visit.profiles?.full_name ?? "-"}</Cell>
-              <Cell>{displayDate(visit.visit_date)}</Cell>
-              <Cell>{visit.done_labels.length ? formatPendingBlocks(visit.done_labels) : <span className="text-slate-500">Ninguna</span>}</Cell>
-              <Cell>{visit.pending_labels.length ? formatPendingBlocks(visit.pending_labels) : <span className="text-slate-500">Ninguna</span>}</Cell>
               <Actions>
-                <IconButton label="Editar" onClick={() => setModal({ type: "territoryVisit", item: visit })}><Edit3 size={16} /></IconButton>
-                <DeleteButton onClick={() => void mutate("deleteTerritoryVisit", { id: visit.id })} />
+                {latestVisit ? (
+                  <>
+                    <IconButton label="Editar ultima visita" onClick={() => setModal({ type: "territoryVisit", item: latestVisit })}><Edit3 size={16} /></IconButton>
+                    <DeleteButton label="Borrar ultima visita" onClick={() => void mutate("deleteTerritoryVisit", { id: latestVisit.id })} />
+                  </>
+                ) : null}
               </Actions>
             </tr>
-          ))}
-        </DataTable>
-      </Panel>
-    </div>
+          );
+        })}
+      </DataTable>
+    </Panel>
   );
 }
 
@@ -2328,14 +2326,12 @@ function DeparturePointModal({
   const [territoryIds, setTerritoryIds] = useState<string[]>(
     () => [...(item?.departure_point_territories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territory_id),
   );
-  const [addingTerritoryId, setAddingTerritoryId] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const availableToAdd = data.territories.filter((territory) => !territoryIds.includes(territory.id));
 
-  function addTerritory() {
-    if (!addingTerritoryId) return;
-    setTerritoryIds((current) => [...current, addingTerritoryId]);
-    setAddingTerritoryId("");
+  function addTerritory(id: string) {
+    setTerritoryIds((current) => (current.includes(id) ? current : [...current, id]));
   }
 
   function removeTerritory(id: string) {
@@ -2396,19 +2392,65 @@ function DeparturePointModal({
             {!territoryIds.length ? <p className="rounded-lg border border-dashed border-white/12 px-3 py-3 text-center text-sm text-slate-500">Sin territorios asociados.</p> : null}
           </div>
 
-          <div className="mt-2 flex items-center gap-2">
-            <div className="flex-1">
-              <Select onChange={setAddingTerritoryId} options={availableToAdd.map((territory) => ({ value: territory.id, label: `Territorio #${territory.number}` }))} placeholder="Agregar territorio" size="compact" value={addingTerritoryId} />
-            </div>
-            <button className={miniButtonClass} disabled={!addingTerritoryId} onClick={addTerritory} type="button">
-              <Plus size={13} aria-hidden="true" />Agregar
-            </button>
-          </div>
+          <button className={miniButtonClass + " mt-2"} onClick={() => setPickerOpen(true)} type="button">
+            <Plus size={13} aria-hidden="true" />Agregar territorio
+          </button>
         </div>
       </div>
 
       <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button>
+
+      {pickerOpen ? (
+        <TerritoryPickerPopup onAdd={addTerritory} onClose={() => setPickerOpen(false)} territories={availableToAdd} />
+      ) : null}
     </form>
+  );
+}
+
+function TerritoryPickerPopup({
+  territories,
+  onAdd,
+  onClose,
+}: {
+  territories: Territory[];
+  onAdd: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = territories
+    .filter((territory) => !query.trim() || String(territory.number).includes(query.trim()))
+    .sort((a, b) => a.number - b.number);
+
+  return (
+    <div className="modal-overlay fixed inset-0 z-[70] grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-white/10 p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold tracking-tight text-white">Agregar territorio</h3>
+          <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} aria-hidden="true" /></button>
+        </div>
+
+        <div className="relative mt-3">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+          <input autoFocus className={inputClass + " mt-0 pl-9"} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por numero..." value={query} />
+        </div>
+
+        <div className="mt-3 grid max-h-72 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-5">
+          {filtered.map((territory) => (
+            <button
+              className="flex aspect-square cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-semibold text-slate-200 transition hover:border-primary/40 hover:bg-primary/10 hover:text-white"
+              key={territory.id}
+              onClick={() => onAdd(territory.id)}
+              type="button"
+            >
+              #{territory.number}
+            </button>
+          ))}
+          {!filtered.length ? <p className="col-span-full py-6 text-center text-sm text-slate-500">Sin resultados.</p> : null}
+        </div>
+
+        <button className={secondaryButtonClass + " mt-4 w-full"} onClick={onClose} type="button">Listo</button>
+      </div>
+    </div>
   );
 }
 
