@@ -8,6 +8,9 @@ import {
   CalendarClock,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
   Clock,
   Copy,
   Edit3,
@@ -41,6 +44,7 @@ import {
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
+import { Select } from "./_components/select";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -118,6 +122,17 @@ type TerritoryRound = {
   territories?: Pick<Territory, "number" | "name"> | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
 };
+type TerritoryVisit = {
+  id: string;
+  territory_round_id: string;
+  conductor_id: string;
+  visit_date: string;
+  done_labels: string[];
+  pending_labels: string[];
+  created_at: string;
+  profiles?: Pick<Profile, "full_name" | "username"> | null;
+  territory_rounds?: { territory_id: string; territories?: Pick<Territory, "number"> | null } | null;
+};
 type WeeklyOutingSlotTerritory = {
   id: string;
   slot_id: string;
@@ -150,8 +165,11 @@ type DeparturePoint = {
   id: string;
   name: string;
   address: string;
-  territory_id: string | null;
-  territories?: Pick<Territory, "number"> | null;
+  departure_point_territories: {
+    territory_id: string;
+    sort_order: number;
+    territories?: Pick<Territory, "number"> | null;
+  }[];
 };
 type WeekendRosterEntry = {
   id: string;
@@ -177,6 +195,7 @@ type AppData = {
   weeklyOutings: WeeklyOuting[];
   departurePoints: DeparturePoint[];
   weekendRoster: WeekendRosterEntry[];
+  territoryVisits: TerritoryVisit[];
 };
 type ModalState =
   | { type: "territory"; item?: Territory }
@@ -190,6 +209,7 @@ type ModalState =
   | { type: "user"; item?: Profile }
   | { type: "password"; item: Profile }
   | { type: "departurePoint"; item?: DeparturePoint }
+  | { type: "territoryVisit"; item: TerritoryVisit }
   | null;
 type ConfirmationState = {
   title: string;
@@ -228,6 +248,7 @@ const emptyData: AppData = {
   weeklyOutings: [],
   departurePoints: [],
   weekendRoster: [],
+  territoryVisits: [],
 };
 
 const reservationStyles: Record<ReservationStatus, string> = {
@@ -412,10 +433,10 @@ export default function Home() {
       <main className="relative z-10 grid min-h-screen place-items-center px-4 py-8 text-slate-100">
         <Toast toast={toast} onClose={() => setToast(null)} />
         <section className="glass-panel floating-card w-full max-w-md rounded-[1.75rem] p-6 sm:p-7">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300 shadow-[0_0_0_1px_rgba(56,189,248,0.06)]">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary-hover shadow-[0_0_0_1px_rgba(94,106,210,0.08)]">
             <ShieldCheck size={22} aria-hidden="true" />
           </span>
-          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-300/90">Peralta Ramos</p>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-primary-hover/90">Peralta Ramos</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Ingresar</h1>
           <p className="mt-2 text-sm leading-6 text-slate-300">Usa tu usuario interno y contrasena asignada.</p>
           <form className="mt-7 space-y-4" onSubmit={login}>
@@ -440,7 +461,6 @@ export default function Home() {
           <div className="grid items-start gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
             <AdminNav
               activeView={activeView}
-              currentUser={profile}
               onChange={setActiveView}
             />
             <div className="min-w-0 space-y-3">
@@ -571,11 +591,9 @@ export default function Home() {
 
 function AdminNav({
   activeView,
-  currentUser,
   onChange,
 }: {
   activeView: string;
-  currentUser: Profile;
   onChange: (view: string) => void;
 }) {
   const tabGroups: Array<{ label: string; items: Array<{ id: string; label: string; icon: ReactNode }> }> = [
@@ -605,9 +623,13 @@ function AdminNav({
         { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
       ],
     },
-    ...(currentUser.roles.includes("CONDUCTOR")
-      ? [{ label: "Tu rol", items: [{ id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> }] }]
-      : []),
+    {
+      label: "Conductores",
+      items: [
+        { id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> },
+        { id: "s13", label: "Registro S-13", icon: <ClipboardList size={17} /> },
+      ],
+    },
   ];
 
   return (
@@ -669,6 +691,7 @@ function AdminTopbar({
     groups: "Grupos",
     users: "Usuarios",
     conductorVisit: "Actualizar territorio",
+    s13: "Registro S-13",
   };
   return (
     <header className="glass-panel flex min-h-16 flex-wrap items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
@@ -755,7 +778,7 @@ function TopbarSearch({
     <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
       <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
       <input
-        className="h-10 w-full rounded-xl border border-white/10 bg-black/25 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-teal-300/50 focus:ring-4 focus:ring-teal-300/10"
+        className="h-10 w-full rounded-xl border border-white/10 bg-black/25 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
         onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder="Buscar territorio, usuario, ventana..."
@@ -823,7 +846,7 @@ function NotificationsBell({
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
               <p className="text-sm font-semibold text-white">Avisos</p>
               {unread.length ? (
-                <button className="text-xs font-semibold text-teal-300 hover:text-teal-200" onClick={() => void mutate("markNotificationRead")} type="button">
+                <button className="text-xs font-semibold text-primary hover:text-primary-hover" onClick={() => void mutate("markNotificationRead")} type="button">
                   Marcar todos
                 </button>
               ) : null}
@@ -873,7 +896,7 @@ function AccountMenu({
       <button
         className={cn(
           "inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl border text-xs font-bold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-          open ? "border-teal-300/40 bg-teal-400/15" : "border-white/10 bg-white/[0.08] hover:bg-white/[0.12]",
+          open ? "border-primary/40 bg-primary/15" : "border-white/10 bg-white/[0.08] hover:bg-white/[0.12]",
         )}
         onClick={() => setOpen((current) => !current)}
         type="button"
@@ -1078,7 +1101,7 @@ function AdminView({
                     <span className="text-sm text-slate-400">Sin manzanas</span>
                   )}
                 </Cell>
-                <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-teal-300" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
+                <Cell><span className="inline-flex items-center gap-2"><Grid3X3 size={15} className="text-primary" />{data.blocks.filter((block) => block.territory_id === territory.id).length}</span></Cell>
                 <Cell>{progress?.last_completed_at ? displayDate(progress.last_completed_at) : <span className="text-slate-500">Sin registro</span>}</Cell>
                 <Cell>{territory.active ? "Si" : "No"}</Cell>
                 <Actions>
@@ -1116,19 +1139,35 @@ function AdminView({
 
   if (activeView === "departurePoints") {
     return (
-      <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los que asocies a un territorio se sugieren solos al armar Salidas semanales." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
-        <DataTable headers={["Nombre", "Direccion", "Territorio", "Acciones"]}>
-          {data.departurePoints.map((point) => (
-            <tr key={point.id}>
-              <Cell><strong>{point.name}</strong></Cell>
-              <Cell>{point.address}</Cell>
-              <Cell>{point.territories?.number ? `Territorio #${point.territories.number}` : <span className="text-slate-500">Sin asociar</span>}</Cell>
-              <Actions>
-                <IconButton label="Editar" onClick={() => setModal({ type: "departurePoint", item: point })}><Edit3 size={16} /></IconButton>
-                <DeleteButton onClick={() => void mutate("deleteRow", { table: "departure_points", id: point.id })} />
-              </Actions>
-            </tr>
-          ))}
+      <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los territorios asociados son los mas cercanos a esa zona, en orden — el generador automatico de Salidas semanales los usa para elegir bien." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
+        <DataTable headers={["Nombre", "Direccion", "Territorios cercanos (de mas a menos)", "Acciones"]}>
+          {data.departurePoints.map((point) => {
+            const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
+            return (
+              <tr key={point.id}>
+                <Cell><strong>{point.name}</strong></Cell>
+                <Cell>{point.address}</Cell>
+                <Cell>
+                  {territories.length ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {territories.map((entry, index) => (
+                        <span className="inline-flex items-center gap-1" key={entry.territory_id}>
+                          <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200">#{entry.territories?.number ?? "?"}</span>
+                          {index < territories.length - 1 ? <span className="text-slate-600">&rarr;</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-500">Sin asociar</span>
+                  )}
+                </Cell>
+                <Actions>
+                  <IconButton label="Editar" onClick={() => setModal({ type: "departurePoint", item: point })}><Edit3 size={16} /></IconButton>
+                  <DeleteButton onClick={() => void mutate("deleteRow", { table: "departure_points", id: point.id })} />
+                </Actions>
+              </tr>
+            );
+          })}
         </DataTable>
       </Panel>
     );
@@ -1136,6 +1175,10 @@ function AdminView({
 
   if (activeView === "conductorVisit") {
     return <ConductorVisitForm data={data} mutate={mutate} />;
+  }
+
+  if (activeView === "s13") {
+    return <S13Panel data={data} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "groups") {
@@ -1378,7 +1421,7 @@ function TerritoryChoiceList({
               <p className="mt-1 text-xs text-slate-500">
                 {completed ? "Territorio completado" : blocked ? "Ya reservado o bloqueado" : "Disponible"}
               </p>
-              <p className="mt-1 text-xs font-medium text-teal-100/85">Última completada: {progress?.last_completed_at ? displayDate(progress.last_completed_at) : "Sin registro"}</p>
+              <p className="mt-1 text-xs font-medium text-primary-hover/85">Última completada: {progress?.last_completed_at ? displayDate(progress.last_completed_at) : "Sin registro"}</p>
             </div>
           </label>
         );
@@ -1527,27 +1570,10 @@ function renderModal({
     );
   }
   if (modal.type === "departurePoint") {
-    return (
-      <FormModal
-        title={modal.item ? "Editar punto de salida" : "Nuevo punto de salida"}
-        onSubmit={(event) => submitFromForm(event, modal.item ? "updateDeparturePoint" : "createDeparturePoint", (form) => ({
-          id: modal.item?.id,
-          name: form.get("name"),
-          address: form.get("address"),
-          territory_id: form.get("territory_id") || null,
-        }))}
-        saving={saving}
-      >
-        <Field label="Nombre"><input className={inputClass} name="name" placeholder="Ej. Casa de Fulano" defaultValue={modal.item?.name} required /></Field>
-        <Field label="Direccion / lugar"><input className={inputClass} name="address" placeholder="Ej. Calle 123, esquina..." defaultValue={modal.item?.address} required /></Field>
-        <Field label="Territorio asociado (opcional)">
-          <select className={inputClass} name="territory_id" defaultValue={modal.item?.territory_id ?? ""}>
-            <option value="">Sin asociar</option>
-            {data.territories.map((territory) => <option key={territory.id} value={territory.id}>Territorio #{territory.number}</option>)}
-          </select>
-        </Field>
-      </FormModal>
-    );
+    return <DeparturePointModal data={data} item={modal.item} mutate={mutate} saving={saving} />;
+  }
+  if (modal.type === "territoryVisit") {
+    return <TerritoryVisitEditModal data={data} item={modal.item} mutate={mutate} saving={saving} />;
   }
   if (modal.type === "adminReservation") {
     const progressById = new Map(data.territoryProgress.map((item) => [item.territory_id, item]));
@@ -1590,17 +1616,22 @@ function ConductorVisitForm({
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
+  const isAdmin = data.profile.roles.includes("ADMIN");
+  const conductors = useMemo(() => data.profiles.filter((item) => item.roles.includes("CONDUCTOR")), [data.profiles]);
+  const [pickedConductorId, setPickedConductorId] = useState("");
+  const effectiveConductorId = isAdmin ? pickedConductorId : data.profile.id;
+
   const openRoundByTerritory = useMemo(
     () => new Map(data.territoryRounds.filter((round) => !round.completed_on).map((round) => [round.territory_id, round])),
     [data.territoryRounds],
   );
   const sortedTerritories = useMemo(() => {
     return [...data.territories].sort((a, b) => {
-      const aMine = openRoundByTerritory.get(a.id)?.conductor_id === data.profile.id ? 0 : 1;
-      const bMine = openRoundByTerritory.get(b.id)?.conductor_id === data.profile.id ? 0 : 1;
+      const aMine = openRoundByTerritory.get(a.id)?.conductor_id === effectiveConductorId ? 0 : 1;
+      const bMine = openRoundByTerritory.get(b.id)?.conductor_id === effectiveConductorId ? 0 : 1;
       return aMine - bMine || a.number - b.number;
     });
-  }, [data.territories, data.profile.id, openRoundByTerritory]);
+  }, [data.territories, effectiveConductorId, openRoundByTerritory]);
 
   const [territoryId, setTerritoryId] = useState(sortedTerritories[0]?.id ?? "");
   const [visitDate, setVisitDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1631,19 +1662,23 @@ function ConductorVisitForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!territoryId) return;
+    if (!territoryId || !effectiveConductorId) return;
     const stillPending = pendingLabels.filter((label) => !doneLabels.has(label));
     const result = await mutate("submitTerritoryVisit", {
       territory_id: territoryId,
       visit_date: visitDate,
       done_labels: [...doneLabels],
       pending_labels: stillPending,
+      ...(isAdmin ? { conductor_id: effectiveConductorId } : {}),
     });
     if (result) setDoneLabels(new Set());
   }
 
+  if (isAdmin && !conductors.length) {
+    return <EmptyState icon={<Users size={24} />} title="Todavia no hay conductores" text="Asignale el rol Conductor a un usuario en Usuarios para poder cargar visitas por el." />;
+  }
   if (!sortedTerritories.length) {
-    return <EmptyState icon={<MapIcon size={24} />} title="No hay territorios activos" text="Cuando el administrador cargue territorios, vas a poder registrar tus visitas aca." />;
+    return <EmptyState icon={<MapIcon size={24} />} title="No hay territorios activos" text="Cuando el administrador cargue territorios, vas a poder registrar visitas aca." />;
   }
 
   return (
@@ -1651,20 +1686,30 @@ function ConductorVisitForm({
       <form className="space-y-5" onSubmit={submit}>
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-white">Actualizar territorio</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            Vas a registrar esta visita como <strong className="text-white">{data.profile.full_name}</strong> (@{data.profile.username}).
-          </p>
+          {isAdmin ? (
+            <p className="mt-2 text-sm leading-6 text-slate-300">Carga una visita en nombre de un conductor.</p>
+          ) : (
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Vas a registrar esta visita como <strong className="text-white">{data.profile.full_name}</strong> (@{data.profile.username}).
+            </p>
+          )}
         </div>
+
+        {isAdmin ? (
+          <Field label="Conductor">
+            <Select onChange={setPickedConductorId} options={conductors.map((item) => ({ value: item.id, label: item.full_name }))} placeholder="Elegir conductor" value={pickedConductorId} />
+          </Field>
+        ) : null}
 
         <Field label="Territorio">
           <select className={inputClass} onChange={(event) => setTerritoryId(event.target.value)} value={territoryId} required>
             {sortedTerritories.map((territory) => {
               const round = openRoundByTerritory.get(territory.id);
-              const mine = round?.conductor_id === data.profile.id;
+              const mine = round?.conductor_id === effectiveConductorId;
               const pendingText = round?.pending_block_labels.length ? ` - Faltan ${formatPendingBlocks(round.pending_block_labels)}` : "";
               return (
                 <option key={territory.id} value={territory.id}>
-                  Territorio #{territory.number}{pendingText}{mine ? " (tuyo)" : ""}
+                  Territorio #{territory.number}{pendingText}{mine ? " (asignado)" : ""}
                 </option>
               );
             })}
@@ -1675,7 +1720,7 @@ function ConductorVisitForm({
 
         <div>
           <p className="text-sm font-medium text-slate-200">Manzanas</p>
-          <p className="mt-1 text-xs text-slate-400">Toca las que completaste en esta visita. Las que queden sin tocar se guardan como pendientes.</p>
+          <p className="mt-1 text-xs text-slate-400">Toca las que se completaron en esta visita. Las que queden sin tocar se guardan como pendientes.</p>
           <div className="mt-3">
             {pendingLabels.length ? (
               <BlockToggleGrid
@@ -1689,11 +1734,142 @@ function ConductorVisitForm({
           </div>
         </div>
 
-        <button className={primaryButtonClass} disabled={!pendingLabels.length} type="submit">
+        <button className={primaryButtonClass} disabled={!pendingLabels.length || !effectiveConductorId} type="submit">
           <Save size={18} aria-hidden="true" />Guardar visita
         </button>
       </form>
     </section>
+  );
+}
+
+function S13Panel({
+  data,
+  mutate,
+  setModal,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
+}) {
+  const sortedRounds = [...data.territoryRounds].sort(
+    (a, b) => (a.territories?.number ?? 0) - (b.territories?.number ?? 0) || b.assigned_on.localeCompare(a.assigned_on),
+  );
+  const sortedVisits = [...data.territoryVisits].sort((a, b) => b.visit_date.localeCompare(a.visit_date) || b.created_at.localeCompare(a.created_at));
+
+  return (
+    <div className="space-y-4">
+      <Panel title="Registro S-13" description="Historial de asignaciones por territorio: quien lo tiene, desde cuando, y que falta.">
+        <DataTable headers={["Territorio", "Conductor", "Asignado", "Estado", "Manzanas"]}>
+          {sortedRounds.map((round) => (
+            <tr key={round.id}>
+              <Cell><strong>Territorio #{round.territories?.number ?? "?"}</strong></Cell>
+              <Cell>{round.profiles?.full_name ?? "-"}</Cell>
+              <Cell>{displayDate(round.assigned_on)}</Cell>
+              <Cell>
+                {round.completed_on ? (
+                  <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Completada {displayDate(round.completed_on)}</Badge>
+                ) : (
+                  <Badge className="border-primary/30 bg-primary/12 text-primary-hover">Abierta</Badge>
+                )}
+              </Cell>
+              <Cell>{round.pending_block_labels.length ? `Faltan ${formatPendingBlocks(round.pending_block_labels)}` : "Completo"}</Cell>
+            </tr>
+          ))}
+        </DataTable>
+      </Panel>
+
+      <Panel title="Visitas registradas" description="Cada envio del formulario de conductor. Los conductores no pueden editar ni borrar sus envios; el administrador si, y el S-13 de arriba se actualiza solo.">
+        <DataTable headers={["Territorio", "Conductor", "Fecha", "Hechas", "Pendientes", "Acciones"]}>
+          {sortedVisits.map((visit) => (
+            <tr key={visit.id}>
+              <Cell>Territorio #{visit.territory_rounds?.territories?.number ?? "?"}</Cell>
+              <Cell>{visit.profiles?.full_name ?? "-"}</Cell>
+              <Cell>{displayDate(visit.visit_date)}</Cell>
+              <Cell>{visit.done_labels.length ? formatPendingBlocks(visit.done_labels) : <span className="text-slate-500">Ninguna</span>}</Cell>
+              <Cell>{visit.pending_labels.length ? formatPendingBlocks(visit.pending_labels) : <span className="text-slate-500">Ninguna</span>}</Cell>
+              <Actions>
+                <IconButton label="Editar" onClick={() => setModal({ type: "territoryVisit", item: visit })}><Edit3 size={16} /></IconButton>
+                <DeleteButton onClick={() => void mutate("deleteTerritoryVisit", { id: visit.id })} />
+              </Actions>
+            </tr>
+          ))}
+        </DataTable>
+      </Panel>
+    </div>
+  );
+}
+
+function TerritoryVisitEditModal({
+  data,
+  mutate,
+  saving,
+  item,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  saving: boolean;
+  item: TerritoryVisit;
+}) {
+  const territoryId = item.territory_rounds?.territory_id ?? "";
+  const territory = data.territories.find((t) => t.id === territoryId);
+  const conductors = useMemo(() => data.profiles.filter((p) => p.roles.includes("CONDUCTOR")), [data.profiles]);
+  const [visitDate, setVisitDate] = useState(item.visit_date);
+  const [conductorId, setConductorId] = useState(item.conductor_id);
+  const [doneLabels, setDoneLabels] = useState<Set<string>>(new Set(item.done_labels));
+
+  const allLabels = useMemo(() => {
+    const territoryBlockLabels = data.blocks.filter((block) => block.territory_id === territoryId).map((block) => block.label);
+    const merged = new Set([...territoryBlockLabels, ...item.done_labels, ...item.pending_labels]);
+    return [...merged].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+  }, [data.blocks, territoryId, item.done_labels, item.pending_labels]);
+
+  function toggle(label: string) {
+    setDoneLabels((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const pendingLabels = allLabels.filter((label) => !doneLabels.has(label));
+    await mutate("updateTerritoryVisit", {
+      id: item.id,
+      visit_date: visitDate,
+      done_labels: [...doneLabels],
+      pending_labels: pendingLabels,
+      conductor_id: conductorId,
+    });
+  }
+
+  return (
+    <form className="space-y-5 p-5 sm:p-6" onSubmit={submit}>
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight text-white">Editar visita</h2>
+        <p className="mt-1 text-sm text-slate-400">Territorio #{territory?.number ?? "?"}</p>
+      </div>
+
+      <Field label="Conductor">
+        <Select onChange={setConductorId} options={conductors.map((c) => ({ value: c.id, label: c.full_name }))} value={conductorId} />
+      </Field>
+      <Field label="Fecha"><input className={inputClass} onChange={(event) => setVisitDate(event.target.value)} type="date" value={visitDate} required /></Field>
+
+      <div>
+        <p className="text-sm font-medium text-slate-200">Manzanas</p>
+        <p className="mt-1 text-xs text-slate-400">Verdes = registradas como hechas en esta visita.</p>
+        <div className="mt-3">
+          {allLabels.length ? (
+            <BlockToggleGrid blocks={allLabels.map((label) => ({ id: label, label }))} onToggle={toggle} selectedIds={doneLabels} />
+          ) : (
+            <p className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-center text-sm text-slate-400">Sin manzanas registradas.</p>
+          )}
+        </div>
+      </div>
+
+      <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button>
+    </form>
   );
 }
 
@@ -1743,19 +1919,16 @@ function WeeklyOutingsPanel({
   return (
     <section className="space-y-4">
       <div className="glass-panel flex flex-wrap items-center gap-3 rounded-[1.5rem] p-3">
-        <div className="relative flex-1 sm:flex-none">
-          <select
-            className="h-12 w-full min-w-[240px] appearance-none rounded-2xl border border-white/10 bg-white/[0.04] px-4 pr-9 text-sm font-semibold text-white outline-none transition hover:bg-white/[0.06] focus:border-teal-300/50"
-            onChange={(event) => setSelectedId(event.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[260px]">
+          <Select
+            className="font-medium"
+            onChange={setSelectedId}
+            options={sortedOutings.map((item) => ({
+              value: item.id,
+              label: `Del ${displayDateEs(item.starts_on)} al ${displayDateEs(addDays(item.starts_on, 6))}`,
+            }))}
             value={outing?.id ?? ""}
-          >
-            {sortedOutings.map((item) => (
-              <option key={item.id} value={item.id}>
-                Del {displayDateEs(item.starts_on)} al {displayDateEs(addDays(item.starts_on, 6))}
-              </option>
-            ))}
-          </select>
-          <CalendarDays className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
+          />
         </div>
         <button className={primarySmallButtonClass} onClick={() => void createOuting()} type="button">
           <Plus size={16} aria-hidden="true" />Nueva semana
@@ -1786,6 +1959,16 @@ function WeeklyOutingsPanel({
   );
 }
 
+function nextAvailableWeekendDate(existingDates: Set<string>) {
+  const today = new Date();
+  const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const diffToSaturday = (6 - cursor.getUTCDay() + 7) % 7;
+  cursor.setUTCDate(cursor.getUTCDate() + diffToSaturday);
+  let candidate = cursor.toISOString().slice(0, 10);
+  while (existingDates.has(candidate)) candidate = addDays(candidate, 1);
+  return candidate;
+}
+
 function WeekendRosterPanel({
   data,
   mutate,
@@ -1794,50 +1977,73 @@ function WeekendRosterPanel({
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
 }) {
   const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
-  const rosterByDate = new Map(data.weekendRoster.map((entry) => [entry.service_date, entry]));
+  const sortedRoster = [...data.weekendRoster].sort((a, b) => a.service_date.localeCompare(b.service_date));
+  const conductorOptions = [{ value: "", label: "Sin asignar" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))];
 
-  const upcoming = useMemo(() => {
-    const today = new Date();
-    const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-    const diffToSaturday = (6 - cursor.getUTCDay() + 7) % 7;
-    cursor.setUTCDate(cursor.getUTCDate() + diffToSaturday);
-    const dates: string[] = [];
-    for (let week = 0; week < 5; week += 1) {
-      dates.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-      dates.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 6);
-    }
-    return dates;
-  }, []);
+  const [adding, setAdding] = useState(false);
+  const [newDate, setNewDate] = useState("");
+  const [newConductorId, setNewConductorId] = useState("");
 
-  const allDates = [...new Set([...upcoming, ...data.weekendRoster.map((entry) => entry.service_date)])].sort();
+  function startAdding() {
+    const existing = new Set(data.weekendRoster.map((entry) => entry.service_date));
+    setNewDate(nextAvailableWeekendDate(existing));
+    setNewConductorId("");
+    setAdding(true);
+  }
+
+  async function confirmAdd() {
+    if (!newDate || !newConductorId) return;
+    const result = await mutate("upsertWeekendRoster", { service_date: newDate, conductor_id: newConductorId });
+    if (result) setAdding(false);
+  }
 
   return (
-    <Panel title="Conductores de fin de semana" description="Asigna quien esta a cargo cada sabado y domingo. Se sugiere solo en las filas de Salidas semanales de ese dia.">
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {allDates.map((date) => {
-          const entry = rosterByDate.get(date);
-          const isSaturday = new Date(`${date}T00:00:00Z`).getUTCDay() === 6;
+    <Panel
+      title="Conductores de fin de semana"
+      description="Vos armas la lista: agrega cada sabado o domingo con su conductor. Se sugiere solo en las filas de Salidas semanales de ese dia."
+      action={<AddButton onClick={startAdding}>Fecha</AddButton>}
+    >
+      <div className="space-y-2">
+        {adding ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-3.5 py-3">
+            <input
+              className="min-h-9 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-sm text-white outline-none"
+              onChange={(event) => setNewDate(event.target.value)}
+              type="date"
+              value={newDate}
+            />
+            <div className="w-44">
+              <Select onChange={setNewConductorId} options={conductors.map((item) => ({ value: item.id, label: item.full_name }))} placeholder="Elegir conductor" size="compact" value={newConductorId} />
+            </div>
+            <button className={miniButtonClass} onClick={() => setAdding(false)} type="button">Cancelar</button>
+            <button className={cn(miniButtonClass, "border-primary/40 bg-primary/15 text-primary-hover")} disabled={!newDate || !newConductorId} onClick={() => void confirmAdd()} type="button">
+              <Plus size={13} aria-hidden="true" />Agregar
+            </button>
+          </div>
+        ) : null}
+
+        {sortedRoster.map((entry) => {
+          const isSaturday = new Date(`${entry.service_date}T00:00:00Z`).getUTCDay() === 6;
           return (
-            <div className="flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.02] px-3.5 py-3" key={date}>
+            <div className="flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.02] px-3.5 py-3" key={entry.id}>
               <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-[10px] font-semibold uppercase", isSaturday ? "border-sky-400/25 bg-sky-500/10 text-sky-200" : "border-amber-400/25 bg-amber-500/10 text-amber-200")}>
                 {isSaturday ? "Sab" : "Dom"}
               </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white">{displayDateEs(date)}</p>
-                <select
-                  className="mt-1 w-full min-w-0 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white outline-none"
-                  onChange={(event) => void mutate("upsertWeekendRoster", { service_date: date, conductor_id: event.target.value || null })}
-                  value={entry?.conductor_id ?? ""}
-                >
-                  <option value="">Sin asignar</option>
-                  {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
-                </select>
+              <p className="w-32 shrink-0 truncate text-sm font-medium text-white">{displayDateEs(entry.service_date)}</p>
+              <div className="w-48">
+                <Select
+                  onChange={(conductorId) => void mutate("upsertWeekendRoster", { service_date: entry.service_date, conductor_id: conductorId || null })}
+                  options={conductorOptions}
+                  size="compact"
+                  value={entry.conductor_id}
+                />
               </div>
+              <DeleteButton onClick={() => void mutate("deleteRow", { table: "weekend_roster", id: entry.id })} />
             </div>
           );
         })}
+
+        {!sortedRoster.length && !adding ? <EmptyState icon={<Users size={24} />} title="Todavia no hay conductores cargados" text="Agrega una fecha para empezar la lista." /> : null}
       </div>
     </Panel>
   );
@@ -1869,7 +2075,7 @@ function WeeklyOutingDays({
                 <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
               </div>
               <button
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-teal-300/30 hover:bg-teal-400/10 hover:text-teal-100"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-primary/30 hover:bg-primary/10 hover:text-primary-hover"
                 onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
                 title="Agregar salida"
                 type="button"
@@ -1941,12 +2147,12 @@ function WeeklyOutingSlotCard({
     return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
   });
   const suggestedPoint = sortedSlotTerritories.length
-    ? data.departurePoints.find((point) => point.territory_id === sortedSlotTerritories[0].territory_id)
+    ? data.departurePoints.find((point) => point.departure_point_territories.some((entry) => entry.territory_id === sortedSlotTerritories[0].territory_id))
     : undefined;
   const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
 
   return (
-    <div className={cn("rounded-2xl border p-3 transition", highlighted ? "border-teal-300/30 bg-teal-400/[0.07]" : "border-white/8 bg-black/15")}>
+    <div className={cn("rounded-2xl border p-3 transition", highlighted ? "border-primary/30 bg-primary/[0.07]" : "border-white/8 bg-black/15")}>
       <div className="flex items-start justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5">
           <Clock className="text-slate-500" size={13} aria-hidden="true" />
@@ -1956,7 +2162,7 @@ function WeeklyOutingSlotCard({
           <SaveStatus status={status} />
           <button
             aria-label="Destacar salida"
-            className={cn("inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition", highlighted ? "text-teal-300" : "text-slate-600 hover:text-slate-300")}
+            className={cn("inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition", highlighted ? "text-primary" : "text-slate-600 hover:text-slate-300")}
             onClick={() => setHighlighted((current) => !current)}
             title="Destacar salida"
             type="button"
@@ -1969,15 +2175,18 @@ function WeeklyOutingSlotCard({
         </div>
       </div>
 
-      <label className="mt-2 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
+      <div className="mt-2 flex items-center gap-2">
         <User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />
-        <select className="w-full min-w-0 bg-transparent text-sm text-white outline-none" onChange={(event) => setConductorId(event.target.value)} value={conductorId}>
-          <option value="">Sin conductor</option>
-          {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
-        </select>
-      </label>
+        <Select
+          className="border-transparent bg-black/20 px-2 py-1"
+          onChange={setConductorId}
+          options={[{ value: "", label: "Sin conductor" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))]}
+          size="compact"
+          value={conductorId}
+        />
+      </div>
       {!conductorId && rosterEntry?.profiles ? (
-        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-teal-300 hover:text-teal-200" onClick={() => setConductorId(rosterEntry.conductor_id)} type="button">
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setConductorId(rosterEntry.conductor_id)} type="button">
           <Wand2 size={12} aria-hidden="true" />Usar {rosterEntry.profiles.full_name} (roster)
         </button>
       ) : null}
@@ -1987,12 +2196,12 @@ function WeeklyOutingSlotCard({
         <input className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-slate-600" onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
       </label>
       {!lugar && suggestedPoint ? (
-        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-teal-300 hover:text-teal-200" onClick={() => setLugar(suggestedPoint.address)} type="button">
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setLugar(suggestedPoint.address)} type="button">
           <Wand2 size={12} aria-hidden="true" />Usar {suggestedPoint.name}
         </button>
       ) : null}
 
-      <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-teal-300/30 hover:bg-teal-400/5" onClick={() => setTerritoryModalOpen(true)} type="button">
+      <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-primary/30 hover:bg-primary/5" onClick={() => setTerritoryModalOpen(true)} type="button">
         {territories.length ? territories.map((text, index) => (
           <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>{text}</span>
         )) : (
@@ -2012,7 +2221,7 @@ function SaveStatus({ status }: { status: "idle" | "saving" | "saved" }) {
   if (status === "saving") {
     return <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300"><Loader2 className="animate-spin" size={11} aria-hidden="true" />Guardando</span>;
   }
-  return <span className="inline-flex items-center gap-1 text-[10px] font-medium text-teal-300"><CheckCircle2 size={11} aria-hidden="true" />Guardado</span>;
+  return <span className="inline-flex items-center gap-1 text-[10px] font-medium text-primary"><CheckCircle2 size={11} aria-hidden="true" />Guardado</span>;
 }
 
 function SlotTerritoryModal({
@@ -2074,11 +2283,11 @@ function SlotTerritoryModal({
               <label
                 className={cn(
                   "flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition",
-                  selected ? "border-teal-300/35 bg-teal-400/10 text-white" : "border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/14 hover:bg-white/[0.05]",
+                  selected ? "border-primary/35 bg-primary/10 text-white" : "border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/14 hover:bg-white/[0.05]",
                 )}
                 key={territory.id}
               >
-                <input checked={selected} className="h-4 w-4 accent-teal-300" onChange={() => toggle(territory.id)} type="checkbox" />
+                <input checked={selected} className="h-4 w-4 accent-primary" onChange={() => toggle(territory.id)} type="checkbox" />
                 <div className="min-w-0">
                   <p className="font-medium">Territorio #{territory.number}</p>
                   <p className="mt-1 text-xs text-slate-500">
@@ -2100,6 +2309,106 @@ function SlotTerritoryModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function DeparturePointModal({
+  data,
+  item,
+  mutate,
+  saving,
+}: {
+  data: AppData;
+  item?: DeparturePoint;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  saving: boolean;
+}) {
+  const [name, setName] = useState(item?.name ?? "");
+  const [address, setAddress] = useState(item?.address ?? "");
+  const [territoryIds, setTerritoryIds] = useState<string[]>(
+    () => [...(item?.departure_point_territories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territory_id),
+  );
+  const [addingTerritoryId, setAddingTerritoryId] = useState("");
+
+  const availableToAdd = data.territories.filter((territory) => !territoryIds.includes(territory.id));
+
+  function addTerritory() {
+    if (!addingTerritoryId) return;
+    setTerritoryIds((current) => [...current, addingTerritoryId]);
+    setAddingTerritoryId("");
+  }
+
+  function removeTerritory(id: string) {
+    setTerritoryIds((current) => current.filter((territoryId) => territoryId !== id));
+  }
+
+  function moveTerritory(index: number, direction: -1 | 1) {
+    setTerritoryIds((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await mutate(item ? "updateDeparturePoint" : "createDeparturePoint", {
+      id: item?.id,
+      name,
+      address,
+      territory_ids: territoryIds,
+    });
+  }
+
+  return (
+    <form className="space-y-5 p-5 sm:p-6" onSubmit={submit}>
+      <h2 className="text-xl font-semibold tracking-tight text-white">{item ? "Editar punto de salida" : "Nuevo punto de salida"}</h2>
+
+      <div className="space-y-4">
+        <Field label="Nombre"><input className={inputClass} onChange={(event) => setName(event.target.value)} placeholder="Ej. Casa de Fulano" required value={name} /></Field>
+        <Field label="Direccion / lugar"><input className={inputClass} onChange={(event) => setAddress(event.target.value)} placeholder="Ej. Calle 123, esquina..." required value={address} /></Field>
+
+        <div>
+          <p className="text-sm font-medium text-slate-200">Territorios cercanos</p>
+          <p className="mt-1 text-xs text-slate-400">De mas cercano a mas lejano. El generador automatico de Salidas semanales elige de esta lista, en este orden.</p>
+
+          <div className="mt-2 space-y-1.5">
+            {territoryIds.map((id, index) => {
+              const territory = data.territories.find((item2) => item2.id === id);
+              return (
+                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5" key={id}>
+                  <span className="w-5 shrink-0 text-center text-xs font-semibold text-slate-500">{index + 1}</span>
+                  <span className="flex-1 truncate text-sm text-white">Territorio #{territory?.number ?? "?"}</span>
+                  <button className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30" disabled={index === 0} onClick={() => moveTerritory(index, -1)} title="Mas cerca" type="button">
+                    <ChevronUp size={14} aria-hidden="true" />
+                  </button>
+                  <button className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30" disabled={index === territoryIds.length - 1} onClick={() => moveTerritory(index, 1)} title="Mas lejos" type="button">
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                  <button className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-300" onClick={() => removeTerritory(id)} title="Quitar" type="button">
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
+            {!territoryIds.length ? <p className="rounded-lg border border-dashed border-white/12 px-3 py-3 text-center text-sm text-slate-500">Sin territorios asociados.</p> : null}
+          </div>
+
+          <div className="mt-2 flex items-center gap-2">
+            <div className="flex-1">
+              <Select onChange={setAddingTerritoryId} options={availableToAdd.map((territory) => ({ value: territory.id, label: `Territorio #${territory.number}` }))} placeholder="Agregar territorio" size="compact" value={addingTerritoryId} />
+            </div>
+            <button className={miniButtonClass} disabled={!addingTerritoryId} onClick={addTerritory} type="button">
+              <Plus size={13} aria-hidden="true" />Agregar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button>
+    </form>
   );
 }
 
@@ -2216,7 +2525,7 @@ function TerritoryBlocksModal({
         </select>
       </Field>
 
-      <div className="rounded-2xl border border-teal-300/15 bg-teal-400/[0.045] p-4 sm:flex sm:items-center sm:justify-between">
+      <div className="rounded-2xl border border-primary/15 bg-primary/[0.045] p-4 sm:flex sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-white">{completedTotal}/{total || 0} completadas</p>
           <p className="mt-1 text-xs text-slate-400">{total > 0 && completedTotal === total ? "El territorio queda completo en esta vuelta." : "Toca cada manzana para marcarla o desmarcarla."}</p>
@@ -2251,8 +2560,8 @@ function TerritoryBlocksModal({
 
       {isCompletionDateOpen ? (
         <div className="fixed inset-0 z-[60] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="completion-date-title">
-          <section className="w-full max-w-sm rounded-2xl border border-teal-300/25 bg-[#142422] p-5 shadow-2xl">
-            <CalendarDays className="text-teal-200" size={22} aria-hidden="true" />
+          <section className="w-full max-w-sm rounded-2xl border border-primary/25 bg-[#141516] p-5 shadow-2xl">
+            <CalendarDays className="text-primary-hover" size={22} aria-hidden="true" />
             <h3 className="mt-4 text-lg font-semibold text-white" id="completion-date-title">Registrar territorio completado</h3>
             <p className="mt-2 text-sm leading-6 text-slate-300">Todas las manzanas están completas. Indica la fecha de finalización.</p>
             <label className="mt-4 block text-sm font-medium text-slate-200">Fecha de finalización<input className={inputClass} type="date" value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} required /></label>
@@ -2267,12 +2576,12 @@ function TerritoryBlocksModal({
   );
 }
 
-const inputClass = "mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-teal-300/60 focus:ring-4 focus:ring-teal-300/10 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
-const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-teal-200/25 bg-teal-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-teal-200 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#091110] disabled:cursor-not-allowed disabled:opacity-60";
-const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-teal-200/25 bg-teal-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-teal-200 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#091110] disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
-const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
-const compactSelectClass = "min-h-10 cursor-pointer rounded-2xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
+const inputClass = "mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-primary/60 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
+const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-primary px-4 py-3 text-sm font-medium text-white transition hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a] disabled:cursor-not-allowed disabled:opacity-60";
+const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a] disabled:cursor-not-allowed disabled:opacity-60";
+const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
+const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
+const compactSelectClass = "min-h-10 cursor-pointer rounded-lg border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
 
 function tabClass(active: boolean) {
   return cn("inline-flex min-h-11 w-auto shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 lg:w-full", active ? "border-white/12 bg-white/[0.09] text-white" : "border-transparent bg-transparent text-slate-400 hover:bg-white/[0.045] hover:text-white");
@@ -2450,7 +2759,7 @@ function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: 
     window.setTimeout(onClose, 180);
   };
   if (!modal) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" || modal.type === "territoryVisit" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
 function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
   return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-300">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;

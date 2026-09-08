@@ -51,6 +51,43 @@ const territoryVisitSchema = z.object({
   pending_labels: z.array(z.string().trim().min(1)).default([]),
 });
 
+const territoryVisitEditSchema = z.object({
+  visit_date: z.string().date(),
+  done_labels: z.array(z.string().trim().min(1)).default([]),
+  pending_labels: z.array(z.string().trim().min(1)).default([]),
+  conductor_id: z.string().uuid(),
+});
+
+async function recomputeTerritoryRound(supabase: ReturnType<typeof createAdminSupabaseClient>, roundId: string) {
+  const { data: visits, error } = await supabase
+    .from("territory_visits")
+    .select("visit_date, conductor_id, done_labels, pending_labels, created_at")
+    .eq("territory_round_id", roundId)
+    .order("visit_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) return error.message;
+
+  if (!visits || !visits.length) {
+    const { error: deleteError } = await supabase.from("territory_rounds").delete().eq("id", roundId);
+    return deleteError?.message ?? null;
+  }
+
+  const first = visits[0];
+  const last = visits[visits.length - 1];
+  const { error: updateError } = await supabase
+    .from("territory_rounds")
+    .update({
+      conductor_id: first.conductor_id,
+      assigned_on: first.visit_date,
+      completed_on: last.pending_labels.length === 0 ? last.visit_date : null,
+      pending_block_labels: last.pending_labels,
+      done_block_labels: last.done_labels,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", roundId);
+  return updateError?.message ?? null;
+}
+
 async function requireProfile() {
   const profile = await getCurrentProfile();
   if (!profile) throw new Error("No autenticado.");
@@ -62,7 +99,7 @@ function isPastDeadline(deadline: string) {
 }
 
 function migrationMessage(message: string) {
-  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id", "reserved_by_admin", "admin_note", "profile_roles", "territory_rounds", "weekly_outing", "departure_points", "weekend_roster"];
+  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id", "reserved_by_admin", "admin_note", "profile_roles", "territory_rounds", "territory_visits", "weekly_outing", "departure_points", "weekend_roster", "departure_point_territories"];
   return fields.some((field) => message.includes(field))
     ? `${message} Ejecuta las migraciones de supabase/ pendientes y vuelve a intentar.`
     : message;
@@ -190,6 +227,7 @@ export async function GET() {
       weeklyOutingsResult,
       departurePointsResult,
       weekendRosterResult,
+      territoryVisitsResult,
     ] = await Promise.all([
       groupsQuery,
       supabase.from("territories").select("*").eq("active", true).order("number"),
@@ -225,10 +263,16 @@ export async function GET() {
             .order("starts_on", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
       isAdmin
-        ? supabase.from("departure_points").select("*, territories(number)").order("name")
+        ? supabase.from("departure_points").select("*, departure_point_territories(territory_id,sort_order,territories(number))").order("name")
         : Promise.resolve({ data: [], error: null }),
       isAdmin
         ? supabase.from("weekend_roster").select("*, profiles!conductor_id(full_name,username)").order("service_date")
+        : Promise.resolve({ data: [], error: null }),
+      isAdmin
+        ? supabase
+            .from("territory_visits")
+            .select("*, profiles!conductor_id(full_name,username), territory_rounds(territory_id, territories(number))")
+            .order("visit_date", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -247,6 +291,7 @@ export async function GET() {
       weeklyOutingsResult.error,
       departurePointsResult.error,
       weekendRosterResult.error,
+      territoryVisitsResult.error,
     ].find(Boolean);
     if (firstError) return fail(migrationMessage(firstError.message), 500);
 
@@ -303,6 +348,7 @@ export async function GET() {
       weeklyOutings: weeklyOutingsResult.data ?? [],
       departurePoints: departurePointsResult.data ?? [],
       weekendRoster: weekendRosterResult.data ?? [],
+      territoryVisits: territoryVisitsResult.data ?? [],
     });
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Error inesperado.", 401);
@@ -400,72 +446,40 @@ export async function POST(request: Request) {
     }
 
     if (action === "submitTerritoryVisit") {
-      if (!profile.roles.includes("CONDUCTOR")) return fail("Esta accion es solo para conductores.", 403);
+      const isAdminCaller = profile.roles.includes("ADMIN");
+      const isConductorCaller = profile.roles.includes("CONDUCTOR");
+      if (!isAdminCaller && !isConductorCaller) return fail("Esta accion es solo para conductores.", 403);
+
       const result = territoryVisitSchema.safeParse(payload);
       if (!result.success) return fail("Completa el territorio, la fecha y las manzanas.", 422);
       const { territory_id, visit_date, done_labels, pending_labels } = result.data;
 
+      let conductorId = profile.id;
+      if (isAdminCaller) {
+        const requested = payload?.conductor_id ? String(payload.conductor_id) : "";
+        if (!requested) return fail("Selecciona el conductor.", 422);
+        conductorId = requested;
+      }
+
       const { data: openRound, error: openRoundError } = await supabase
         .from("territory_rounds")
-        .select("*")
+        .select("id")
         .eq("territory_id", territory_id)
         .is("completed_on", null)
         .maybeSingle();
       if (openRoundError) return fail(openRoundError.message);
 
-      const allDone = pending_labels.length === 0;
-      let territoryRoundId: string;
-
-      if (allDone) {
-        if (openRound) {
-          const { error } = await supabase
-            .from("territory_rounds")
-            .update({
-              completed_on: visit_date,
-              pending_block_labels: [],
-              done_block_labels: [...new Set([...(openRound.done_block_labels ?? []), ...done_labels])],
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", openRound.id);
-          if (error) return fail(error.message);
-          territoryRoundId = openRound.id;
-        } else {
-          const { data: created, error } = await supabase
-            .from("territory_rounds")
-            .insert({
-              territory_id,
-              conductor_id: profile.id,
-              assigned_on: visit_date,
-              completed_on: visit_date,
-              pending_block_labels: [],
-              done_block_labels: done_labels,
-            })
-            .select("id")
-            .single();
-          if (error || !created) return fail(error?.message ?? "No se pudo registrar la visita.");
-          territoryRoundId = created.id;
-        }
-      } else if (openRound) {
-        const { error } = await supabase
-          .from("territory_rounds")
-          .update({
-            pending_block_labels: pending_labels,
-            done_block_labels: done_labels,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", openRound.id);
-        if (error) return fail(error.message);
-        territoryRoundId = openRound.id;
-      } else {
+      let territoryRoundId = openRound?.id;
+      if (!territoryRoundId) {
         const { data: created, error } = await supabase
           .from("territory_rounds")
           .insert({
             territory_id,
-            conductor_id: profile.id,
+            conductor_id: conductorId,
             assigned_on: visit_date,
             completed_on: null,
-            pending_block_labels: pending_labels,
-            done_block_labels: done_labels,
+            pending_block_labels: [],
+            done_block_labels: [],
           })
           .select("id")
           .single();
@@ -473,13 +487,17 @@ export async function POST(request: Request) {
         territoryRoundId = created.id;
       }
 
-      await supabase.from("territory_visits").insert({
+      const { error: visitError } = await supabase.from("territory_visits").insert({
         territory_round_id: territoryRoundId,
-        conductor_id: profile.id,
+        conductor_id: conductorId,
         visit_date,
         done_labels,
         pending_labels,
       });
+      if (visitError) return fail(visitError.message);
+
+      const recomputeError = await recomputeTerritoryRound(supabase, territoryRoundId);
+      if (recomputeError) return fail(recomputeError);
 
       return ok();
     }
@@ -603,6 +621,43 @@ export async function POST(request: Request) {
       return ok();
     }
 
+    if (action === "updateTerritoryVisit") {
+      const id = String(payload?.id ?? "");
+      const result = territoryVisitEditSchema.safeParse(payload);
+      if (!result.success) return fail("Completa la fecha, el conductor y las manzanas.", 422);
+
+      const { data: existing, error: fetchError } = await supabase.from("territory_visits").select("territory_round_id").eq("id", id).single();
+      if (fetchError || !existing) return fail("Visita no encontrada.", 404);
+
+      const { error } = await supabase
+        .from("territory_visits")
+        .update({
+          visit_date: result.data.visit_date,
+          done_labels: result.data.done_labels,
+          pending_labels: result.data.pending_labels,
+          conductor_id: result.data.conductor_id,
+        })
+        .eq("id", id);
+      if (error) return fail(error.message);
+
+      const recomputeError = await recomputeTerritoryRound(supabase, existing.territory_round_id);
+      if (recomputeError) return fail(recomputeError);
+      return ok();
+    }
+
+    if (action === "deleteTerritoryVisit") {
+      const id = String(payload?.id ?? "");
+      const { data: existing, error: fetchError } = await supabase.from("territory_visits").select("territory_round_id").eq("id", id).single();
+      if (fetchError || !existing) return fail("Visita no encontrada.", 404);
+
+      const { error } = await supabase.from("territory_visits").delete().eq("id", id);
+      if (error) return fail(error.message);
+
+      const recomputeError = await recomputeTerritoryRound(supabase, existing.territory_round_id);
+      if (recomputeError) return fail(recomputeError);
+      return ok();
+    }
+
     if (action === "setTerritoryBlockProgress") {
       const annualRoundId = String(payload?.annual_round_id ?? "");
       const territoryId = String(payload?.territory_id ?? "");
@@ -690,15 +745,29 @@ export async function POST(request: Request) {
       const row = {
         name: String(payload?.name ?? "").trim(),
         address: String(payload?.address ?? "").trim(),
-        territory_id: payload?.territory_id ? String(payload.territory_id) : null,
         updated_at: new Date().toISOString(),
       };
       if (!row.name || !row.address) return fail("Completa el nombre y la direccion.", 422);
-      const query = action === "createDeparturePoint"
-        ? supabase.from("departure_points").insert(row)
-        : supabase.from("departure_points").update(row).eq("id", String(payload?.id));
-      const { error } = await query;
-      if (error) return fail(error.message);
+      const territoryIds = Array.isArray(payload?.territory_ids) ? payload.territory_ids.map((id) => String(id)) : [];
+
+      let pointId = String(payload?.id ?? "");
+      if (action === "createDeparturePoint") {
+        const { data: created, error } = await supabase.from("departure_points").insert(row).select("id").single();
+        if (error || !created) return fail(error?.message ?? "No se pudo crear el punto.");
+        pointId = created.id;
+      } else {
+        const { error } = await supabase.from("departure_points").update(row).eq("id", pointId);
+        if (error) return fail(error.message);
+      }
+
+      const { error: deleteError } = await supabase.from("departure_point_territories").delete().eq("departure_point_id", pointId);
+      if (deleteError) return fail(deleteError.message);
+      if (territoryIds.length) {
+        const { error: insertError } = await supabase.from("departure_point_territories").insert(
+          territoryIds.map((territoryId, index) => ({ departure_point_id: pointId, territory_id: territoryId, sort_order: index })),
+        );
+        if (insertError) return fail(insertError.message);
+      }
       return ok();
     }
 
@@ -768,7 +837,7 @@ export async function POST(request: Request) {
 
     if (action === "deleteRow") {
       const table = String(payload?.table);
-      if (!["territories", "groups", "blocks", "annual_rounds", "departure_points"].includes(table)) return fail("Tabla invalida.", 422);
+      if (!["territories", "groups", "blocks", "annual_rounds", "departure_points", "weekend_roster"].includes(table)) return fail("Tabla invalida.", 422);
       const { error } = await supabase.from(table).delete().eq("id", String(payload?.id));
       if (error) return fail(error.message);
       return ok();
@@ -936,14 +1005,26 @@ export async function POST(request: Request) {
         .single();
       if (outingError || !outing) return fail("Semana no encontrada.", 404);
 
-      const [territoriesResult, territoryRoundsResult, completedStatusesResult, existingSlotsResult] = await Promise.all([
+      const [territoriesResult, territoryRoundsResult, completedStatusesResult, existingSlotsResult, departurePointsResult] = await Promise.all([
         supabase.from("territories").select("id").eq("active", true),
         supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
         supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
-        supabase.from("weekly_outing_slots").select("id,slot_date").eq("weekly_outing_id", weeklyOutingId),
+        supabase.from("weekly_outing_slots").select("id,slot_date,lugar").eq("weekly_outing_id", weeklyOutingId),
+        supabase.from("departure_points").select("address,departure_point_territories(territory_id,sort_order)"),
       ]);
-      const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error].find(Boolean);
+      const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error, departurePointsResult.error].find(Boolean);
       if (firstError) return fail(firstError.message);
+
+      const activeTerritoryIds = new Set((territoriesResult.data ?? []).map((territory) => territory.id));
+      const territoryIdsByAddress = new Map<string, string[]>();
+      for (const point of departurePointsResult.data ?? []) {
+        const key = point.address.trim().toLowerCase();
+        const ids = [...(point.departure_point_territories ?? [])]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((entry) => entry.territory_id)
+          .filter((id) => activeTerritoryIds.has(id));
+        if (ids.length) territoryIdsByAddress.set(key, ids);
+      }
 
       const lastCompletedByTerritory = new Map<string, string>();
       for (const status of completedStatusesResult.data ?? []) {
@@ -988,36 +1069,41 @@ export async function POST(request: Request) {
         return date.toISOString().slice(0, 10);
       });
 
-      const targetSlotIds: string[] = [];
+      const targetSlots: { id: string; lugar: string | null }[] = [];
       for (const day of days) {
         const daySlots = existingSlots.filter((slot) => slot.slot_date === day);
         const emptySlot = daySlots.find((slot) => !slotsWithTerritory.has(slot.id));
         if (emptySlot) {
-          targetSlotIds.push(emptySlot.id);
+          targetSlots.push({ id: emptySlot.id, lugar: emptySlot.lugar });
           continue;
         }
         if (daySlots.length === 0) {
           const { data: created, error } = await supabase
             .from("weekly_outing_slots")
             .insert({ weekly_outing_id: weeklyOutingId, slot_date: day, sort_order: 0 })
-            .select("id")
+            .select("id,lugar")
             .single();
           if (error) return fail(error.message);
-          if (created) targetSlotIds.push(created.id);
+          if (created) targetSlots.push({ id: created.id, lugar: created.lugar });
         }
       }
 
       const usedTerritoryIds = new Set<string>();
       let pointer = 0;
-      for (const slotId of targetSlotIds) {
+      function nextFromGlobalPriority() {
         while (pointer < priorityTerritoryIds.length && usedTerritoryIds.has(priorityTerritoryIds[pointer])) pointer += 1;
-        if (pointer >= priorityTerritoryIds.length) break;
-        const territoryId = priorityTerritoryIds[pointer];
+        return pointer < priorityTerritoryIds.length ? priorityTerritoryIds[pointer] : null;
+      }
+
+      for (const slot of targetSlots) {
+        const nearby = slot.lugar ? territoryIdsByAddress.get(slot.lugar.trim().toLowerCase()) : undefined;
+        const territoryId = nearby?.find((id) => !usedTerritoryIds.has(id)) ?? nextFromGlobalPriority();
+        if (!territoryId) break;
         usedTerritoryIds.add(territoryId);
-        pointer += 1;
+        if (!nearby?.includes(territoryId)) pointer += 1;
 
         const { error } = await supabase.from("weekly_outing_slot_territories").insert({
-          slot_id: slotId,
+          slot_id: slot.id,
           territory_id: territoryId,
           territory_round_id: openRoundByTerritory.get(territoryId)?.id ?? null,
           sort_order: 0,

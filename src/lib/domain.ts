@@ -113,34 +113,36 @@ export function isTerritoryAvailable(territory: Territory) {
 }
 
 export function formatPendingBlocks(labels: string[]) {
-  const numbered = labels
-    .map((label) => {
-      const match = label.match(/^([A-Za-z]*)(\d+)$/);
-      return match ? { prefix: match[1] || "M", num: Number(match[2]), label } : null;
-    })
-    .filter((entry): entry is { prefix: string; num: number; label: string } => entry !== null)
-    .sort((a, b) => a.num - b.num);
+  const numbered: { prefix: string; num: number; label: string }[] = [];
+  const other: string[] = [];
 
-  if (!numbered.length) return "";
+  for (const label of labels) {
+    const match = label.match(/^([A-Za-z]*)(\d+)$/);
+    if (match) numbered.push({ prefix: match[1] || "M", num: Number(match[2]), label });
+    else other.push(label);
+  }
+  numbered.sort((a, b) => a.num - b.num || a.prefix.localeCompare(b.prefix));
 
   const groups: string[] = [];
-  let start = numbered[0];
-  let prev = numbered[0];
+  if (numbered.length) {
+    let start = numbered[0];
+    let prev = numbered[0];
 
-  for (let i = 1; i <= numbered.length; i += 1) {
-    const current = numbered[i];
-    if (current && current.num === prev.num + 1 && current.prefix === prev.prefix) {
-      prev = current;
-      continue;
-    }
-    groups.push(start === prev ? start.label : `${start.label}-${prev.label}`);
-    if (current) {
-      start = current;
-      prev = current;
+    for (let i = 1; i <= numbered.length; i += 1) {
+      const current = numbered[i];
+      if (current && current.num === prev.num + 1 && current.prefix === prev.prefix) {
+        prev = current;
+        continue;
+      }
+      groups.push(start === prev ? start.label : `${start.label}-${prev.label}`);
+      if (current) {
+        start = current;
+        prev = current;
+      }
     }
   }
 
-  return groups.join(",");
+  return [...groups, ...other].join(",");
 }
 
 export const mockTerritories: Territory[] = [
