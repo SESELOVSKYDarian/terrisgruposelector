@@ -8,19 +8,24 @@ import {
   CalendarClock,
   CalendarDays,
   CheckCircle2,
+  Clock,
   Copy,
   Edit3,
   Grid3X3,
   KeyRound,
+  Loader2,
   LogOut,
   Map as MapIcon,
   MapPin,
   Plus,
   RefreshCw,
   Save,
+  Search,
   ShieldCheck,
+  Star,
   Trash2,
   TriangleAlert,
+  User,
   Users,
   Wand2,
   X,
@@ -141,6 +146,19 @@ type WeeklyOuting = {
   starts_on: string;
   weekly_outing_slots: WeeklyOutingSlot[];
 };
+type DeparturePoint = {
+  id: string;
+  name: string;
+  address: string;
+  territory_id: string | null;
+  territories?: Pick<Territory, "number"> | null;
+};
+type WeekendRosterEntry = {
+  id: string;
+  service_date: string;
+  conductor_id: string;
+  profiles?: Pick<Profile, "full_name" | "username"> | null;
+};
 type AppData = {
   profile: Profile;
   groups: Group[];
@@ -157,6 +175,8 @@ type AppData = {
   notifications: Notification[];
   territoryRounds: TerritoryRound[];
   weeklyOutings: WeeklyOuting[];
+  departurePoints: DeparturePoint[];
+  weekendRoster: WeekendRosterEntry[];
 };
 type ModalState =
   | { type: "territory"; item?: Territory }
@@ -169,6 +189,7 @@ type ModalState =
   | { type: "reservation"; window: ReservationWindow; date: string; item?: Reservation }
   | { type: "user"; item?: Profile }
   | { type: "password"; item: Profile }
+  | { type: "departurePoint"; item?: DeparturePoint }
   | null;
 type ConfirmationState = {
   title: string;
@@ -205,6 +226,8 @@ const emptyData: AppData = {
   notifications: [],
   territoryRounds: [],
   weeklyOutings: [],
+  departurePoints: [],
+  weekendRoster: [],
 };
 
 const reservationStyles: Record<ReservationStatus, string> = {
@@ -327,6 +350,8 @@ export default function Home() {
     "createWeeklyOutingSlot",
     "updateWeeklyOutingSlot",
     "setSlotTerritories",
+    "autoFillWeeklyOuting",
+    "upsertWeekendRoster",
   ]);
 
   function requestConfirmation(action: string) {
@@ -390,7 +415,7 @@ export default function Home() {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-500/12 text-sky-300 shadow-[0_0_0_1px_rgba(56,189,248,0.06)]">
             <ShieldCheck size={22} aria-hidden="true" />
           </span>
-          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-300/90">Terris Grupo Selector</p>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-300/90">Peralta Ramos</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Ingresar</h1>
           <p className="mt-2 text-sm leading-6 text-slate-300">Usa tu usuario interno y contrasena asignada.</p>
           <form className="mt-7 space-y-4" onSubmit={login}>
@@ -412,18 +437,21 @@ export default function Home() {
       <Toast toast={toast} onClose={() => setToast(null)} />
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {isAdmin ? (
-          <div className="grid items-start gap-4 lg:grid-cols-[72px_minmax(0,1fr)]">
+          <div className="grid items-start gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
             <AdminNav
               activeView={activeView}
               currentUser={profile}
               onChange={setActiveView}
-              onLogout={logout}
             />
             <div className="min-w-0 space-y-3">
               <AdminTopbar
                 activeView={activeView}
+                currentUser={profile}
                 data={data}
                 mutate={mutate}
+                onLogout={logout}
+                setActiveView={setActiveView}
+                setModal={setModal}
               />
               <div className="view-transition min-w-0" key={activeView}>
                 <AdminView
@@ -441,7 +469,7 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{profile.full_name}</h1>
                 <div className="mt-3 flex gap-2">
                   <button className={tabClass(activeView !== "conductorVisit")} onClick={() => setActiveView("reservations")} type="button">Reservas</button>
@@ -467,7 +495,7 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Actualizar territorio</h1>
                 <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
               </div>
@@ -486,7 +514,7 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Reservas de mi grupo</h1>
                 <p className="mt-2 text-sm text-slate-400">
                   {profile.full_name} - {data.groups[0]?.name ?? "Sin grupo asignado"}
@@ -507,7 +535,7 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Terris Grupo Selector</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
                 <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
               </div>
               <button className={secondaryButtonClass} onClick={logout} type="button">
@@ -545,29 +573,29 @@ function AdminNav({
   activeView,
   currentUser,
   onChange,
-  onLogout,
 }: {
   activeView: string;
   currentUser: Profile;
   onChange: (view: string) => void;
-  onLogout: () => void;
 }) {
   const tabGroups: Array<{ label: string; items: Array<{ id: string; label: string; icon: ReactNode }> }> = [
     { label: "", items: [{ id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> }] },
+    {
+      label: "Territorios",
+      items: [
+        { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
+        { id: "weekendRoster", label: "Conductores de fin de semana", icon: <Users size={17} /> },
+        { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
+        { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
+        { id: "departurePoints", label: "Puntos de salida", icon: <MapPin size={17} /> },
+      ],
+    },
     {
       label: "Reservas",
       items: [
         { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
         { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
         { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
-      ],
-    },
-    {
-      label: "Territorios",
-      items: [
-        { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
-        { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
-        { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
       ],
     },
     {
@@ -581,63 +609,52 @@ function AdminNav({
       ? [{ label: "Tu rol", items: [{ id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> }] }]
       : []),
   ];
-  const initials = currentUser.full_name
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
 
   return (
-    <aside className="admin-sidebar glass-panel flex h-fit min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[620px]" aria-label="Administracion">
-      <div className="flex items-center gap-3 px-2 py-2">
+    <aside className="admin-sidebar glass-panel flex min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]" aria-label="Administracion">
+      <div className="flex shrink-0 items-center gap-3 px-2 py-2">
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white text-black">
           <ShieldCheck size={19} aria-hidden="true" />
         </span>
-        <div className="admin-nav-copy min-w-0">
-          <p className="truncate text-sm font-semibold text-white">Terris</p>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-white">Peralta Ramos</p>
           <p className="truncate text-xs text-slate-500">Administración</p>
         </div>
       </div>
 
-      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-3 lg:overflow-visible lg:pb-0" aria-label="Secciones">
+      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3 lg:overflow-y-auto lg:pb-0" aria-label="Secciones">
         {tabGroups.map((group, index) => (
-          <div className="lg:space-y-1" key={group.label || `group-${index}`}>
-            {group.label ? <p className="admin-nav-label hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 lg:block">{group.label}</p> : null}
+          <div className="shrink-0 lg:space-y-1" key={group.label || `group-${index}`}>
+            {group.label ? <p className="hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 lg:block">{group.label}</p> : null}
             {group.items.map(({ id, label, icon }) => (
               <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
                 <span className="shrink-0">{icon}</span>
-                <span className="admin-nav-label whitespace-nowrap">{label}</span>
+                <span className="whitespace-nowrap">{label}</span>
               </button>
             ))}
           </div>
         ))}
       </nav>
-
-      <div className="mt-auto flex items-center gap-2 rounded-[1.25rem] border border-white/8 bg-white/[0.025] p-2">
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] text-xs font-bold text-white">
-          {initials}
-        </span>
-        <div className="admin-nav-copy min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
-          <p className="truncate text-xs text-slate-500">@{currentUser.username} · Super admin</p>
-        </div>
-        <button className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onLogout} type="button" aria-label="Cerrar sesión" title="Cerrar sesión">
-          <LogOut size={17} aria-hidden="true" />
-        </button>
-      </div>
     </aside>
   );
 }
 
 function AdminTopbar({
   activeView,
+  currentUser,
   data,
   mutate,
+  onLogout,
+  setActiveView,
+  setModal,
 }: {
   activeView: string;
+  currentUser: Profile;
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  onLogout: () => void;
+  setActiveView: (view: string) => void;
+  setModal: (modal: ModalState) => void;
 }) {
   const sectionLabels: Record<string, string> = {
     dashboard: "Resumen",
@@ -647,17 +664,127 @@ function AdminTopbar({
     territories: "Territorios",
     rounds: "Vueltas",
     outings: "Salidas semanales",
+    weekendRoster: "Conductores de fin de semana",
+    departurePoints: "Puntos de salida",
     groups: "Grupos",
     users: "Usuarios",
     conductorVisit: "Actualizar territorio",
   };
   return (
-    <header className="glass-panel flex min-h-16 items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
-      <NotificationsBell data={data} mutate={mutate} />
-      <div className="min-w-0">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-white">{sectionLabels[activeView] ?? "Administración"}</h1>
+    <header className="glass-panel flex min-h-16 flex-wrap items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
+      <h1 className="truncate text-lg font-semibold tracking-tight text-white">{sectionLabels[activeView] ?? "Administración"}</h1>
+      <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-none">
+        <TopbarSearch data={data} setActiveView={setActiveView} setModal={setModal} />
+        <NotificationsBell data={data} mutate={mutate} />
+        <AccountMenu currentUser={currentUser} onLogout={onLogout} />
       </div>
     </header>
+  );
+}
+
+type SearchResult = { id: string; type: string; label: string; sublabel?: string; onSelect: () => void };
+
+function TopbarSearch({
+  data,
+  setActiveView,
+  setModal,
+}: {
+  data: AppData;
+  setActiveView: (view: string) => void;
+  setModal: (modal: ModalState) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const results = useMemo<SearchResult[]>(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [];
+    const matches: SearchResult[] = [];
+
+    for (const territory of data.territories) {
+      if (!`territorio ${territory.number}`.includes(term)) continue;
+      matches.push({
+        id: `territory:${territory.id}`,
+        type: "Territorio",
+        label: `Territorio #${territory.number}`,
+        onSelect: () => {
+          setActiveView("territories");
+          setModal({ type: "territoryBlocks", territory });
+        },
+      });
+    }
+    for (const item of data.profiles) {
+      if (!item.full_name.toLowerCase().includes(term) && !item.username.toLowerCase().includes(term)) continue;
+      matches.push({
+        id: `user:${item.id}`,
+        type: "Usuario",
+        label: item.full_name,
+        sublabel: `@${item.username}`,
+        onSelect: () => setActiveView("users"),
+      });
+    }
+    for (const window of data.reservationWindows) {
+      if (!window.name.toLowerCase().includes(term)) continue;
+      matches.push({
+        id: `window:${window.id}`,
+        type: "Ventana",
+        label: window.name,
+        onSelect: () => setActiveView("windows"),
+      });
+    }
+    for (const group of data.groups) {
+      if (!group.name.toLowerCase().includes(term)) continue;
+      matches.push({
+        id: `group:${group.id}`,
+        type: "Grupo",
+        label: group.name,
+        onSelect: () => setActiveView("groups"),
+      });
+    }
+
+    return matches.slice(0, 8);
+  }, [data.groups, data.profiles, data.reservationWindows, data.territories, query, setActiveView, setModal]);
+
+  function select(result: SearchResult) {
+    result.onSelect();
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
+      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
+      <input
+        className="h-10 w-full rounded-xl border border-white/10 bg-black/25 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-teal-300/50 focus:ring-4 focus:ring-teal-300/10"
+        onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Buscar territorio, usuario, ventana..."
+        type="text"
+        value={query}
+      />
+      {open && query.trim() ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[280px] overflow-hidden rounded-[1.1rem] border border-white/10 bg-[#0c1615] shadow-2xl">
+            {results.length ? (
+              <div className="max-h-[60vh] divide-y divide-white/8 overflow-y-auto">
+                {results.map((result) => (
+                  <button className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-white/[0.05]" key={result.id} onClick={() => select(result)} type="button">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-white">{result.label}</span>
+                      {result.sublabel ? <span className="block truncate text-xs text-slate-500">{result.sublabel}</span> : null}
+                    </span>
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">{result.type}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="px-4 py-4 text-center text-sm text-slate-400">Sin resultados.</p>
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -676,7 +803,7 @@ function NotificationsBell({
     <div className="relative shrink-0">
       <button
         className={cn(
-          "relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
           open
             ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
             : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
@@ -686,13 +813,13 @@ function NotificationsBell({
         aria-expanded={open}
         aria-label={unread.length ? `Avisos, ${unread.length} sin leer` : "Avisos"}
       >
-        <Bell size={18} aria-hidden="true" />
+        <Bell size={17} aria-hidden="true" />
         {unread.length ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unread.length > 99 ? "99+" : unread.length}</span> : null}
       </button>
       {open ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1615] shadow-2xl sm:left-auto sm:right-0">
+          <div className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1615] shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
               <p className="text-sm font-semibold text-white">Avisos</p>
               {unread.length ? (
@@ -719,6 +846,53 @@ function NotificationsBell({
                 <p className="px-4 py-6 text-center text-sm text-slate-400">Todavia no hay avisos.</p>
               )}
             </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenu({
+  currentUser,
+  onLogout,
+}: {
+  currentUser: Profile;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const initials = currentUser.full_name
+    .split(" ")
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        className={cn(
+          "inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl border text-xs font-bold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          open ? "border-teal-300/40 bg-teal-400/15" : "border-white/10 bg-white/[0.08] hover:bg-white/[0.12]",
+        )}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+        aria-expanded={open}
+        aria-label="Cuenta"
+      >
+        {initials}
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,260px)] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#0c1615] shadow-2xl">
+            <div className="border-b border-white/10 px-4 py-3">
+              <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
+              <p className="truncate text-xs text-slate-500">@{currentUser.username}</p>
+            </div>
+            <button className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-slate-200 transition hover:bg-white/[0.05]" onClick={onLogout} type="button">
+              <LogOut size={16} aria-hidden="true" />Cerrar sesión
+            </button>
           </div>
         </>
       ) : null}
@@ -934,6 +1108,30 @@ function AdminView({
 
   if (activeView === "outings") {
     return <WeeklyOutingsPanel data={data} mutate={mutate} />;
+  }
+
+  if (activeView === "weekendRoster") {
+    return <WeekendRosterPanel data={data} mutate={mutate} />;
+  }
+
+  if (activeView === "departurePoints") {
+    return (
+      <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los que asocies a un territorio se sugieren solos al armar Salidas semanales." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
+        <DataTable headers={["Nombre", "Direccion", "Territorio", "Acciones"]}>
+          {data.departurePoints.map((point) => (
+            <tr key={point.id}>
+              <Cell><strong>{point.name}</strong></Cell>
+              <Cell>{point.address}</Cell>
+              <Cell>{point.territories?.number ? `Territorio #${point.territories.number}` : <span className="text-slate-500">Sin asociar</span>}</Cell>
+              <Actions>
+                <IconButton label="Editar" onClick={() => setModal({ type: "departurePoint", item: point })}><Edit3 size={16} /></IconButton>
+                <DeleteButton onClick={() => void mutate("deleteRow", { table: "departure_points", id: point.id })} />
+              </Actions>
+            </tr>
+          ))}
+        </DataTable>
+      </Panel>
+    );
   }
 
   if (activeView === "conductorVisit") {
@@ -1328,6 +1526,29 @@ function renderModal({
     </FormModal>
     );
   }
+  if (modal.type === "departurePoint") {
+    return (
+      <FormModal
+        title={modal.item ? "Editar punto de salida" : "Nuevo punto de salida"}
+        onSubmit={(event) => submitFromForm(event, modal.item ? "updateDeparturePoint" : "createDeparturePoint", (form) => ({
+          id: modal.item?.id,
+          name: form.get("name"),
+          address: form.get("address"),
+          territory_id: form.get("territory_id") || null,
+        }))}
+        saving={saving}
+      >
+        <Field label="Nombre"><input className={inputClass} name="name" placeholder="Ej. Casa de Fulano" defaultValue={modal.item?.name} required /></Field>
+        <Field label="Direccion / lugar"><input className={inputClass} name="address" placeholder="Ej. Calle 123, esquina..." defaultValue={modal.item?.address} required /></Field>
+        <Field label="Territorio asociado (opcional)">
+          <select className={inputClass} name="territory_id" defaultValue={modal.item?.territory_id ?? ""}>
+            <option value="">Sin asociar</option>
+            {data.territories.map((territory) => <option key={territory.id} value={territory.id}>Territorio #{territory.number}</option>)}
+          </select>
+        </Field>
+      </FormModal>
+    );
+  }
   if (modal.type === "adminReservation") {
     const progressById = new Map(data.territoryProgress.map((item) => [item.territory_id, item]));
     const blockedInWindow = new Set(
@@ -1497,47 +1718,130 @@ function WeeklyOutingsPanel({
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
 }) {
-  const [selectedId, setSelectedId] = useState(data.weeklyOutings[0]?.id ?? "");
-  const outing = data.weeklyOutings.find((item) => item.id === selectedId) ?? data.weeklyOutings[0];
+  const sortedOutings = useMemo(
+    () => [...data.weeklyOutings].sort((a, b) => a.starts_on.localeCompare(b.starts_on)),
+    [data.weeklyOutings],
+  );
+  const [selectedId, setSelectedId] = useState(sortedOutings[0]?.id ?? "");
+  const outing = sortedOutings.find((item) => item.id === selectedId) ?? sortedOutings[0];
   const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
 
   function nextThursdayDefault() {
+    const existingStarts = new Set(data.weeklyOutings.map((item) => item.starts_on));
     const today = new Date();
     const day = today.getUTCDay();
-    const diff = (4 - day + 7) % 7 || 7;
-    return addDays(today.toISOString().slice(0, 10), diff);
+    let candidate = addDays(today.toISOString().slice(0, 10), (4 - day + 7) % 7 || 7);
+    while (existingStarts.has(candidate)) candidate = addDays(candidate, 7);
+    return candidate;
+  }
+
+  async function createOuting() {
+    const result = await mutate("createWeeklyOuting", { starts_on: nextThursdayDefault() });
+    if (result && typeof result === "object" && "id" in result) setSelectedId(String((result as { id: string }).id));
   }
 
   return (
-    <div className="space-y-4">
-      <Panel
-        title="Salidas semanales"
-        description="Una fila por horario, agrupadas por dia, de jueves a miercoles."
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <select className={compactSelectClass} onChange={(event) => setSelectedId(event.target.value)} value={outing?.id ?? ""}>
-              {data.weeklyOutings.map((item) => (
-                <option key={item.id} value={item.id}>
-                  Salidas del {displayDateEs(item.starts_on)} al {displayDateEs(addDays(item.starts_on, 6))}
-                </option>
-              ))}
-            </select>
-            <AddButton onClick={() => void mutate("createWeeklyOuting", { starts_on: nextThursdayDefault() })}>Semana</AddButton>
-            {outing ? <DeleteButton label="Eliminar semana" onClick={() => void mutate("deleteWeeklyOuting", { id: outing.id })} /> : null}
-          </div>
-        }
-      >
+    <section className="space-y-4">
+      <div className="glass-panel flex flex-wrap items-center gap-3 rounded-[1.5rem] p-3">
+        <div className="relative flex-1 sm:flex-none">
+          <select
+            className="h-12 w-full min-w-[240px] appearance-none rounded-2xl border border-white/10 bg-white/[0.04] px-4 pr-9 text-sm font-semibold text-white outline-none transition hover:bg-white/[0.06] focus:border-teal-300/50"
+            onChange={(event) => setSelectedId(event.target.value)}
+            value={outing?.id ?? ""}
+          >
+            {sortedOutings.map((item) => (
+              <option key={item.id} value={item.id}>
+                Del {displayDateEs(item.starts_on)} al {displayDateEs(addDays(item.starts_on, 6))}
+              </option>
+            ))}
+          </select>
+          <CalendarDays className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
+        </div>
+        <button className={primarySmallButtonClass} onClick={() => void createOuting()} type="button">
+          <Plus size={16} aria-hidden="true" />Nueva semana
+        </button>
         {outing ? (
-          <WeeklyOutingTable data={data} conductors={conductors} mutate={mutate} outing={outing} />
-        ) : (
-          <EmptyState icon={<CalendarDays size={24} />} title="Todavia no hay semanas cargadas" text="Crea una semana para empezar a completar horarios." />
-        )}
-      </Panel>
-    </div>
+          <button
+            className={secondaryButtonClass}
+            onClick={() => void mutate("autoFillWeeklyOuting", { weekly_outing_id: outing.id })}
+            title="Completa los dias sin territorio con los que hace mas tiempo no se trabajan o los que quedaron a medias"
+            type="button"
+          >
+            <Wand2 size={16} aria-hidden="true" />Generar automatico
+          </button>
+        ) : null}
+        {outing ? (
+          <button className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-rose-300" onClick={() => void mutate("deleteWeeklyOuting", { id: outing.id })} type="button">
+            <Trash2 size={14} aria-hidden="true" />Eliminar esta semana
+          </button>
+        ) : null}
+      </div>
+
+      {outing ? (
+        <WeeklyOutingDays data={data} conductors={conductors} mutate={mutate} outing={outing} />
+      ) : (
+        <EmptyState icon={<CalendarDays size={24} />} title="Todavia no hay semanas cargadas" text="Crea una semana para empezar a completar horarios." />
+      )}
+    </section>
   );
 }
 
-function WeeklyOutingTable({
+function WeekendRosterPanel({
+  data,
+  mutate,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+}) {
+  const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
+  const rosterByDate = new Map(data.weekendRoster.map((entry) => [entry.service_date, entry]));
+
+  const upcoming = useMemo(() => {
+    const today = new Date();
+    const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const diffToSaturday = (6 - cursor.getUTCDay() + 7) % 7;
+    cursor.setUTCDate(cursor.getUTCDate() + diffToSaturday);
+    const dates: string[] = [];
+    for (let i = 0; i < 10; i += 1) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return dates;
+  }, []);
+
+  const allDates = [...new Set([...upcoming, ...data.weekendRoster.map((entry) => entry.service_date)])].sort();
+
+  return (
+    <Panel title="Conductores de fin de semana" description="Asigna quien esta a cargo cada sabado y domingo. Se sugiere solo en las filas de Salidas semanales de ese dia.">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {allDates.map((date) => {
+          const entry = rosterByDate.get(date);
+          const isSaturday = new Date(`${date}T00:00:00Z`).getUTCDay() === 6;
+          return (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.02] px-3.5 py-3" key={date}>
+              <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-[10px] font-semibold uppercase", isSaturday ? "border-sky-400/25 bg-sky-500/10 text-sky-200" : "border-amber-400/25 bg-amber-500/10 text-amber-200")}>
+                {isSaturday ? "Sab" : "Dom"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">{displayDateEs(date)}</p>
+                <select
+                  className="mt-1 w-full min-w-0 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white outline-none"
+                  onChange={(event) => void mutate("upsertWeekendRoster", { service_date: date, conductor_id: event.target.value || null })}
+                  value={entry?.conductor_id ?? ""}
+                >
+                  <option value="">Sin asignar</option>
+                  {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
+                </select>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function WeeklyOutingDays({
   data,
   conductors,
   mutate,
@@ -1549,25 +1853,33 @@ function WeeklyOutingTable({
   outing: WeeklyOuting;
 }) {
   return (
-    <div className="space-y-5">
+    <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
       {outingDayLabels.map((dayLabel, index) => {
         const slotDate = addDays(outing.starts_on, index);
         const slots = outing.weekly_outing_slots
           .filter((slot) => slot.slot_date === slotDate)
           .sort((a, b) => a.sort_order - b.sort_order);
         return (
-          <div className="overflow-hidden rounded-2xl border border-white/8" key={slotDate}>
-            <div className="sticky top-0 flex items-center justify-between bg-white/[0.04] px-4 py-2.5">
-              <p className="text-sm font-semibold text-white">{dayLabel} - {displayDateEs(slotDate)}</p>
-              <button className={miniButtonClass} onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })} type="button">
-                <Plus size={14} />Agregar salida
+          <div className="glass-panel-soft flex flex-col gap-3 rounded-[1.35rem] p-3.5" key={slotDate}>
+            <div className="flex items-center justify-between gap-2 px-0.5">
+              <div>
+                <p className="text-sm font-semibold text-white">{dayLabel}</p>
+                <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
+              </div>
+              <button
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-teal-300/30 hover:bg-teal-400/10 hover:text-teal-100"
+                onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
+                title="Agregar salida"
+                type="button"
+              >
+                <Plus size={15} aria-hidden="true" />
               </button>
             </div>
-            <div className="divide-y divide-white/8">
-              {slots.map((slot, slotIndex) => (
-                <WeeklyOutingSlotRow conductors={conductors} data={data} key={slot.id} mutate={mutate} slot={slot} striped={slotIndex % 2 === 1} />
+            <div className="space-y-2.5">
+              {slots.map((slot) => (
+                <WeeklyOutingSlotCard conductors={conductors} data={data} key={slot.id} mutate={mutate} slot={slot} />
               ))}
-              {!slots.length ? <p className="px-4 py-3 text-sm text-slate-500">Sin salidas cargadas.</p> : null}
+              {!slots.length ? <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-slate-500">Sin salidas.</p> : null}
             </div>
           </div>
         );
@@ -1576,24 +1888,24 @@ function WeeklyOutingTable({
   );
 }
 
-function WeeklyOutingSlotRow({
+function WeeklyOutingSlotCard({
   data,
   conductors,
   mutate,
   slot,
-  striped,
 }: {
   data: AppData;
   conductors: Profile[];
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
   slot: WeeklyOutingSlot;
-  striped: boolean;
 }) {
   const [territoryModalOpen, setTerritoryModalOpen] = useState(false);
   const [hora, setHora] = useState(slot.hora ?? "");
   const [lugar, setLugar] = useState(slot.lugar ?? "");
   const [conductorId, setConductorId] = useState(slot.conductor_id ?? "");
   const [highlighted, setHighlighted] = useState(slot.highlighted);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const saveTimeout = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setHora(slot.hora ?? "");
@@ -1602,65 +1914,103 @@ function WeeklyOutingSlotRow({
     setHighlighted(slot.highlighted);
   }, [slot.id, slot.hora, slot.lugar, slot.conductor_id, slot.highlighted]);
 
-  const dirty = hora !== (slot.hora ?? "") || lugar !== (slot.lugar ?? "") || conductorId !== (slot.conductor_id ?? "") || highlighted !== slot.highlighted;
+  useEffect(() => {
+    const dirty = hora !== (slot.hora ?? "") || lugar !== (slot.lugar ?? "") || conductorId !== (slot.conductor_id ?? "") || highlighted !== slot.highlighted;
+    if (!dirty) return;
+    setStatus("saving");
+    window.clearTimeout(saveTimeout.current);
+    saveTimeout.current = window.setTimeout(() => {
+      void mutate("updateWeeklyOutingSlot", {
+        id: slot.id,
+        hora: hora || null,
+        lugar: lugar || null,
+        conductor_id: conductorId || null,
+        highlighted,
+      }).then(() => setStatus("saved"));
+    }, 700);
+    return () => window.clearTimeout(saveTimeout.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hora, lugar, conductorId, highlighted]);
 
-  const territoryText = [...slot.weekly_outing_slot_territories]
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .map((entry) => {
-      const number = entry.territories?.number ?? "?";
-      const pending = entry.territory_rounds?.pending_block_labels ?? [];
-      return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
-    })
-    .join(" + ");
-
-  function save() {
-    void mutate("updateWeeklyOutingSlot", {
-      id: slot.id,
-      hora: hora || null,
-      lugar: lugar || null,
-      conductor_id: conductorId || null,
-      highlighted,
-    });
-  }
+  const sortedSlotTerritories = [...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order);
+  const territories = sortedSlotTerritories.map((entry) => {
+    const number = entry.territories?.number ?? "?";
+    const pending = entry.territory_rounds?.pending_block_labels ?? [];
+    return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
+  });
+  const suggestedPoint = sortedSlotTerritories.length
+    ? data.departurePoints.find((point) => point.territory_id === sortedSlotTerritories[0].territory_id)
+    : undefined;
+  const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
 
   return (
-    <div className={cn("grid grid-cols-2 gap-x-2.5 gap-y-2 px-4 py-3 sm:grid-cols-[96px_1fr_1fr_1fr_auto] sm:items-center", slot.highlighted ? "border-l-2 border-teal-300/25 bg-teal-400/[0.06]" : striped ? "bg-white/[0.02]" : "")}>
-      <label className="block">
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Hora</span>
-        <input className={compactSelectClass + " w-full"} onChange={(event) => setHora(event.target.value)} type="time" value={hora} />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Conductor</span>
-        <select className={compactSelectClass + " w-full"} onChange={(event) => setConductorId(event.target.value)} value={conductorId}>
+    <div className={cn("rounded-2xl border p-3 transition", highlighted ? "border-teal-300/30 bg-teal-400/[0.07]" : "border-white/8 bg-black/15")}>
+      <div className="flex items-start justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5">
+          <Clock className="text-slate-500" size={13} aria-hidden="true" />
+          <input className="w-[68px] bg-transparent text-sm text-white outline-none" onChange={(event) => setHora(event.target.value)} type="time" value={hora} />
+        </span>
+        <div className="flex items-center gap-1">
+          <SaveStatus status={status} />
+          <button
+            aria-label="Destacar salida"
+            className={cn("inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition", highlighted ? "text-teal-300" : "text-slate-600 hover:text-slate-300")}
+            onClick={() => setHighlighted((current) => !current)}
+            title="Destacar salida"
+            type="button"
+          >
+            <Star fill={highlighted ? "currentColor" : "none"} size={15} aria-hidden="true" />
+          </button>
+          <button aria-label="Eliminar salida" className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-600 transition hover:text-rose-300" onClick={() => void mutate("deleteWeeklyOutingSlot", { id: slot.id })} title="Eliminar salida" type="button">
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <label className="mt-2 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
+        <User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />
+        <select className="w-full min-w-0 bg-transparent text-sm text-white outline-none" onChange={(event) => setConductorId(event.target.value)} value={conductorId}>
           <option value="">Sin conductor</option>
           {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
         </select>
       </label>
-      <label className="block">
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Lugar</span>
-        <input className={compactSelectClass + " w-full"} onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
+      {!conductorId && rosterEntry?.profiles ? (
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-teal-300 hover:text-teal-200" onClick={() => setConductorId(rosterEntry.conductor_id)} type="button">
+          <Wand2 size={12} aria-hidden="true" />Usar {rosterEntry.profiles.full_name} (roster)
+        </button>
+      ) : null}
+
+      <label className="mt-2 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
+        <MapPin className="shrink-0 text-slate-500" size={13} aria-hidden="true" />
+        <input className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-slate-600" onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
       </label>
-      <div>
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500 sm:hidden">Territorios</span>
-        <button className={cn(compactSelectClass, "w-full text-left")} onClick={() => setTerritoryModalOpen(true)} type="button">
-          {territoryText || <span className="text-slate-500">Elegir territorios</span>}
+      {!lugar && suggestedPoint ? (
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-teal-300 hover:text-teal-200" onClick={() => setLugar(suggestedPoint.address)} type="button">
+          <Wand2 size={12} aria-hidden="true" />Usar {suggestedPoint.name}
         </button>
-      </div>
-      <div className="col-span-2 flex items-center justify-between gap-2 sm:col-span-1 sm:justify-self-end">
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
-          <input checked={highlighted} className="h-3.5 w-3.5 accent-teal-300" onChange={(event) => setHighlighted(event.target.checked)} type="checkbox" />
-          Destacar
-        </label>
-        <button className={cn(miniButtonClass, dirty && "border-teal-300/40 bg-teal-400/12 text-teal-100")} disabled={!dirty} onClick={save} type="button">
-          <Save size={13} aria-hidden="true" />{dirty ? "Guardar" : "Guardado"}
-        </button>
-        <DeleteButton onClick={() => void mutate("deleteWeeklyOutingSlot", { id: slot.id })} />
-      </div>
+      ) : null}
+
+      <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-teal-300/30 hover:bg-teal-400/5" onClick={() => setTerritoryModalOpen(true)} type="button">
+        {territories.length ? territories.map((text, index) => (
+          <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>{text}</span>
+        )) : (
+          <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><MapIcon size={13} aria-hidden="true" />Elegir territorios</span>
+        )}
+      </button>
+
       {territoryModalOpen ? (
         <SlotTerritoryModal data={data} mutate={mutate} onClose={() => setTerritoryModalOpen(false)} slot={slot} />
       ) : null}
     </div>
   );
+}
+
+function SaveStatus({ status }: { status: "idle" | "saving" | "saved" }) {
+  if (status === "idle") return null;
+  if (status === "saving") {
+    return <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300"><Loader2 className="animate-spin" size={11} aria-hidden="true" />Guardando</span>;
+  }
+  return <span className="inline-flex items-center gap-1 text-[10px] font-medium text-teal-300"><CheckCircle2 size={11} aria-hidden="true" />Guardado</span>;
 }
 
 function SlotTerritoryModal({

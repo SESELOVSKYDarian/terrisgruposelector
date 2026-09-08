@@ -62,7 +62,7 @@ function isPastDeadline(deadline: string) {
 }
 
 function migrationMessage(message: string) {
-  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id", "reserved_by_admin", "admin_note", "profile_roles", "territory_rounds", "weekly_outing"];
+  const fields = ["reservation_windows", "reservation_window_id", "departure_location", "admin_notifications", "group_id", "reserved_by_admin", "admin_note", "profile_roles", "territory_rounds", "weekly_outing", "departure_points", "weekend_roster"];
   return fields.some((field) => message.includes(field))
     ? `${message} Ejecuta las migraciones de supabase/ pendientes y vuelve a intentar.`
     : message;
@@ -188,6 +188,8 @@ export async function GET() {
       notificationsResult,
       territoryRoundsResult,
       weeklyOutingsResult,
+      departurePointsResult,
+      weekendRosterResult,
     ] = await Promise.all([
       groupsQuery,
       supabase.from("territories").select("*").eq("active", true).order("number"),
@@ -222,6 +224,12 @@ export async function GET() {
             .select("*, weekly_outing_slots(*, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(*, territories(number), territory_rounds(pending_block_labels,conductor_id)))")
             .order("starts_on", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
+      isAdmin
+        ? supabase.from("departure_points").select("*, territories(number)").order("name")
+        : Promise.resolve({ data: [], error: null }),
+      isAdmin
+        ? supabase.from("weekend_roster").select("*, profiles!conductor_id(full_name,username)").order("service_date")
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const firstError = [
@@ -237,6 +245,8 @@ export async function GET() {
       notificationsResult.error,
       territoryRoundsResult.error,
       weeklyOutingsResult.error,
+      departurePointsResult.error,
+      weekendRosterResult.error,
     ].find(Boolean);
     if (firstError) return fail(migrationMessage(firstError.message), 500);
 
@@ -291,6 +301,8 @@ export async function GET() {
       notifications: notificationsResult.data ?? [],
       territoryRounds: territoryRoundsResult.data ?? [],
       weeklyOutings: weeklyOutingsResult.data ?? [],
+      departurePoints: departurePointsResult.data ?? [],
+      weekendRoster: weekendRosterResult.data ?? [],
     });
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Error inesperado.", 401);
@@ -674,6 +686,43 @@ export async function POST(request: Request) {
       return ok();
     }
 
+    if (action === "createDeparturePoint" || action === "updateDeparturePoint") {
+      const row = {
+        name: String(payload?.name ?? "").trim(),
+        address: String(payload?.address ?? "").trim(),
+        territory_id: payload?.territory_id ? String(payload.territory_id) : null,
+        updated_at: new Date().toISOString(),
+      };
+      if (!row.name || !row.address) return fail("Completa el nombre y la direccion.", 422);
+      const query = action === "createDeparturePoint"
+        ? supabase.from("departure_points").insert(row)
+        : supabase.from("departure_points").update(row).eq("id", String(payload?.id));
+      const { error } = await query;
+      if (error) return fail(error.message);
+      return ok();
+    }
+
+    if (action === "upsertWeekendRoster") {
+      const serviceDate = String(payload?.service_date ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return fail("Fecha invalida.", 422);
+      const day = new Date(`${serviceDate}T00:00:00Z`).getUTCDay();
+      if (day !== 6 && day !== 0) return fail("La fecha debe ser sabado o domingo.", 422);
+
+      const conductorId = payload?.conductor_id ? String(payload.conductor_id) : null;
+      if (!conductorId) {
+        const { error } = await supabase.from("weekend_roster").delete().eq("service_date", serviceDate);
+        if (error) return fail(error.message);
+        return ok();
+      }
+
+      const { error } = await supabase.from("weekend_roster").upsert(
+        { service_date: serviceDate, conductor_id: conductorId, updated_at: new Date().toISOString() },
+        { onConflict: "service_date" },
+      );
+      if (error) return fail(error.message);
+      return ok();
+    }
+
     if (action === "createBlock" || action === "updateBlock") {
       const row = { territory_id: String(payload?.territory_id), label: String(payload?.label ?? "").trim() };
       const query = action === "createBlock"
@@ -719,7 +768,7 @@ export async function POST(request: Request) {
 
     if (action === "deleteRow") {
       const table = String(payload?.table);
-      if (!["territories", "groups", "blocks", "annual_rounds"].includes(table)) return fail("Tabla invalida.", 422);
+      if (!["territories", "groups", "blocks", "annual_rounds", "departure_points"].includes(table)) return fail("Tabla invalida.", 422);
       const { error } = await supabase.from(table).delete().eq("id", String(payload?.id));
       if (error) return fail(error.message);
       return ok();
@@ -875,6 +924,107 @@ export async function POST(request: Request) {
         const { error } = await supabase.from("weekly_outing_slot_territories").insert(rows);
         if (error) return fail(error.message);
       }
+      return ok();
+    }
+
+    if (action === "autoFillWeeklyOuting") {
+      const weeklyOutingId = String(payload?.weekly_outing_id ?? "");
+      const { data: outing, error: outingError } = await supabase
+        .from("weekly_outings")
+        .select("starts_on")
+        .eq("id", weeklyOutingId)
+        .single();
+      if (outingError || !outing) return fail("Semana no encontrada.", 404);
+
+      const [territoriesResult, territoryRoundsResult, completedStatusesResult, existingSlotsResult] = await Promise.all([
+        supabase.from("territories").select("id").eq("active", true),
+        supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
+        supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
+        supabase.from("weekly_outing_slots").select("id,slot_date").eq("weekly_outing_id", weeklyOutingId),
+      ]);
+      const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error].find(Boolean);
+      if (firstError) return fail(firstError.message);
+
+      const lastCompletedByTerritory = new Map<string, string>();
+      for (const status of completedStatusesResult.data ?? []) {
+        const blockRef = Array.isArray(status.blocks) ? status.blocks[0] : status.blocks;
+        const territoryId = blockRef?.territory_id;
+        if (!territoryId || !status.completed_on) continue;
+        const current = lastCompletedByTerritory.get(territoryId);
+        if (!current || status.completed_on > current) lastCompletedByTerritory.set(territoryId, status.completed_on);
+      }
+
+      const openRoundByTerritory = new Map<string, { id: string; assigned_on: string }>();
+      for (const round of territoryRoundsResult.data ?? []) {
+        if (round.completed_on) continue;
+        openRoundByTerritory.set(round.territory_id, { id: round.id, assigned_on: round.assigned_on });
+      }
+
+      const priorityTerritoryIds = (territoriesResult.data ?? [])
+        .map((territory) => ({
+          id: territory.id,
+          open: openRoundByTerritory.get(territory.id) ?? null,
+          lastCompleted: lastCompletedByTerritory.get(territory.id) ?? null,
+        }))
+        .sort((a, b) => {
+          if (Boolean(a.open) !== Boolean(b.open)) return a.open ? -1 : 1;
+          if (a.open && b.open) return a.open.assigned_on.localeCompare(b.open.assigned_on);
+          return (a.lastCompleted ?? "").localeCompare(b.lastCompleted ?? "");
+        })
+        .map((entry) => entry.id);
+
+      const existingSlots = existingSlotsResult.data ?? [];
+      const existingSlotIds = existingSlots.map((slot) => slot.id);
+      const { data: existingSlotTerritories, error: slotTerritoriesError } = existingSlotIds.length
+        ? await supabase.from("weekly_outing_slot_territories").select("slot_id").in("slot_id", existingSlotIds)
+        : { data: [], error: null };
+      if (slotTerritoriesError) return fail(slotTerritoriesError.message);
+      const slotsWithTerritory = new Set((existingSlotTerritories ?? []).map((entry) => entry.slot_id));
+
+      const startsOn = outing.starts_on;
+      const days = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(`${startsOn}T00:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + index);
+        return date.toISOString().slice(0, 10);
+      });
+
+      const targetSlotIds: string[] = [];
+      for (const day of days) {
+        const daySlots = existingSlots.filter((slot) => slot.slot_date === day);
+        const emptySlot = daySlots.find((slot) => !slotsWithTerritory.has(slot.id));
+        if (emptySlot) {
+          targetSlotIds.push(emptySlot.id);
+          continue;
+        }
+        if (daySlots.length === 0) {
+          const { data: created, error } = await supabase
+            .from("weekly_outing_slots")
+            .insert({ weekly_outing_id: weeklyOutingId, slot_date: day, sort_order: 0 })
+            .select("id")
+            .single();
+          if (error) return fail(error.message);
+          if (created) targetSlotIds.push(created.id);
+        }
+      }
+
+      const usedTerritoryIds = new Set<string>();
+      let pointer = 0;
+      for (const slotId of targetSlotIds) {
+        while (pointer < priorityTerritoryIds.length && usedTerritoryIds.has(priorityTerritoryIds[pointer])) pointer += 1;
+        if (pointer >= priorityTerritoryIds.length) break;
+        const territoryId = priorityTerritoryIds[pointer];
+        usedTerritoryIds.add(territoryId);
+        pointer += 1;
+
+        const { error } = await supabase.from("weekly_outing_slot_territories").insert({
+          slot_id: slotId,
+          territory_id: territoryId,
+          territory_round_id: openRoundByTerritory.get(territoryId)?.id ?? null,
+          sort_order: 0,
+        });
+        if (error) return fail(error.message);
+      }
+
       return ok();
     }
 

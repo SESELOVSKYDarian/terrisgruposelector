@@ -131,37 +131,9 @@ textarea {
 
 .admin-sidebar {
   z-index: 20;
-  transition: box-shadow 180ms ease;
 }
 
 @media (min-width: 1024px) {
-  .admin-sidebar {
-    width: 72px;
-    overflow: hidden;
-  }
-
-  .admin-sidebar:hover,
-  .admin-sidebar:focus-within {
-    width: 248px;
-    box-shadow: 18px 18px 42px rgba(0, 0, 0, 0.28);
-  }
-
-  .admin-sidebar .admin-nav-copy,
-  .admin-sidebar .admin-nav-label {
-    max-width: 0;
-    opacity: 0;
-    overflow: hidden;
-    transition: opacity 140ms ease;
-  }
-
-  .admin-sidebar:hover .admin-nav-copy,
-  .admin-sidebar:hover .admin-nav-label,
-  .admin-sidebar:focus-within .admin-nav-copy,
-  .admin-sidebar:focus-within .admin-nav-label {
-    max-width: 180px;
-    opacity: 1;
-  }
-
   .admin-sidebar nav button {
     width: 100%;
   }
