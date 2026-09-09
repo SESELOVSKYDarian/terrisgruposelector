@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import {
   createAdminSupabaseClient,
+  createOtpPendingToken,
+  generateOtpCode,
   hashPassword,
+  otpPendingCookieName,
   setSessionCookie,
+  trustCookieName,
   verifyPassword,
+  verifyTrustToken,
   type SessionProfile,
 } from "@/lib/server/auth";
+import { otpEmailHtml, sendMail } from "@/lib/server/mail";
 import { fail } from "@/lib/server/responses";
 import type { Role } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const { username, password } = (await request.json()) as {
+  const { username, password, deviceSecure } = (await request.json()) as {
     username?: string;
     password?: string;
+    deviceSecure?: boolean;
   };
 
   if (!username || !password) {
@@ -28,7 +36,7 @@ export async function POST(request: Request) {
 
   const { data: existingProfile, error } = await supabase
     .from("profiles")
-    .select("id, username, full_name, group_id, active, must_change_password, password_hash, profile_roles(role)")
+    .select("id, username, full_name, group_id, active, must_change_password, password_hash, email, approval_status, profile_roles(role)")
     .eq("username", cleanUsername)
     .maybeSingle();
 
@@ -68,7 +76,7 @@ export async function POST(request: Request) {
     await supabase.from("profile_roles").upsert({ profile_id: adminProfile.id, role: "ADMIN" }, { onConflict: "profile_id,role" });
     const profile: SessionProfile = { ...adminProfile, roles: ["ADMIN"] };
     await setSessionCookie(profile);
-    return NextResponse.json({ profile });
+    return NextResponse.json({ status: "ok", profile });
   }
 
   if (!existingProfile || !existingProfile.active) {
@@ -77,6 +85,10 @@ export async function POST(request: Request) {
 
   if (!verifyPassword(password, existingProfile.password_hash ?? "")) {
     return fail("Usuario o contrasena incorrectos.", 401);
+  }
+
+  if (existingProfile.approval_status === "pending") {
+    return NextResponse.json({ status: "pending" });
   }
 
   const profile: SessionProfile = {
@@ -89,6 +101,24 @@ export async function POST(request: Request) {
     must_change_password: existingProfile.must_change_password,
   };
 
-  await setSessionCookie(profile);
-  return NextResponse.json({ profile });
+  const cookieStore = await cookies();
+  const trustValid = verifyTrustToken(cookieStore.get(trustCookieName)?.value, profile.id);
+
+  if (trustValid || deviceSecure || !existingProfile.email) {
+    await setSessionCookie(profile);
+    return NextResponse.json({ status: "ok", profile, offerPasskey: Boolean(deviceSecure) && !trustValid });
+  }
+
+  const code = generateOtpCode();
+  await sendMail(existingProfile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+  const pendingToken = createOtpPendingToken(profile.id, code);
+  cookieStore.set(otpPendingCookieName, pendingToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 10 * 60,
+    path: "/",
+  });
+
+  return NextResponse.json({ status: "otp" });
 }

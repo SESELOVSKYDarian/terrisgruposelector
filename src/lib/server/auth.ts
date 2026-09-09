@@ -161,3 +161,101 @@ export function isAnciano(profile: SessionProfile) {
 export function generateTemporaryPassword() {
   return randomBytes(9).toString("base64url");
 }
+
+function signGenericPayload<T extends object>(payload: T, ttlMs: number) {
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + ttlMs })).toString("base64url");
+  return `${body}.${sign(body)}`;
+}
+
+function verifyGenericPayload<T>(token?: string): (T & { exp: number }) | null {
+  if (!token) return null;
+  const [body, signature] = token.split(".");
+
+  if (!body || !signature || sign(body) !== signature) {
+    return null;
+  }
+
+  const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as T & { exp: number };
+
+  if (!payload.exp || payload.exp < Date.now()) {
+    return null;
+  }
+
+  return payload;
+}
+
+export const otpPendingCookieName = "terris_otp_pending";
+export const trustCookieName = "terris_trust";
+export const webauthnChallengeCookieName = "terris_webauthn_challenge";
+export const hasPasskeyCookieName = "terris_has_passkey";
+
+const otpTtlMs = 10 * 60 * 1000;
+const trustTtlMs = 7 * 24 * 60 * 60 * 1000;
+const webauthnChallengeTtlMs = 5 * 60 * 1000;
+
+export function generateOtpCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashOtpCode(code: string) {
+  return createHmac("sha256", getSessionSecret()).update(code).digest("base64url");
+}
+
+type OtpPendingPayload = { profileId: string; codeHash: string; attempts: number };
+
+export function createOtpPendingToken(profileId: string, code: string) {
+  return signGenericPayload<OtpPendingPayload>({ profileId, codeHash: hashOtpCode(code), attempts: 0 }, otpTtlMs);
+}
+
+export function reissueOtpPendingToken(token: string) {
+  const payload = verifyGenericPayload<OtpPendingPayload>(token);
+  if (!payload) return null;
+  return signGenericPayload<OtpPendingPayload>({ profileId: payload.profileId, codeHash: payload.codeHash, attempts: payload.attempts + 1 }, otpTtlMs);
+}
+
+export function readOtpPendingProfileId(token?: string) {
+  return verifyGenericPayload<OtpPendingPayload>(token)?.profileId ?? null;
+}
+
+export function verifyOtpCode(token: string | undefined, code: string) {
+  const payload = verifyGenericPayload<OtpPendingPayload>(token);
+  if (!payload) return { ok: false as const, reason: "expired" as const };
+  if (payload.attempts >= 5) return { ok: false as const, reason: "too_many_attempts" as const };
+
+  const candidateHash = hashOtpCode(code);
+  const matches = candidateHash.length === payload.codeHash.length && timingSafeEqual(Buffer.from(candidateHash), Buffer.from(payload.codeHash));
+
+  if (!matches) return { ok: false as const, reason: "mismatch" as const };
+  return { ok: true as const, profileId: payload.profileId };
+}
+
+type TrustPayload = { profileId: string };
+
+export function createTrustToken(profileId: string) {
+  return signGenericPayload<TrustPayload>({ profileId }, trustTtlMs);
+}
+
+export function verifyTrustToken(token: string | undefined, profileId: string) {
+  const payload = verifyGenericPayload<TrustPayload>(token);
+  return payload?.profileId === profileId;
+}
+
+type ResetPayload = { profileId: string };
+
+export function createResetToken(profileId: string) {
+  return signGenericPayload<ResetPayload>({ profileId }, 30 * 60 * 1000);
+}
+
+export function verifyResetToken(token: string) {
+  return verifyGenericPayload<ResetPayload>(token)?.profileId ?? null;
+}
+
+type WebauthnChallengePayload = { challenge: string; profileId?: string };
+
+export function createWebauthnChallengeToken(challenge: string, profileId?: string) {
+  return signGenericPayload<WebauthnChallengePayload>({ challenge, profileId }, webauthnChallengeTtlMs);
+}
+
+export function verifyWebauthnChallengeToken(token: string | undefined) {
+  return verifyGenericPayload<WebauthnChallengePayload>(token);
+}

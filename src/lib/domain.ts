@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const roles = ["ADMIN", "ANCIANO", "CONDUCTOR"] as const;
+export const roles = ["ADMIN", "ANCIANO", "CONDUCTOR", "PUBLICADOR"] as const;
 export const blockStatuses = [
   "PENDING",
   "IN_PROGRESS",
@@ -110,6 +110,22 @@ export function calculateTerritoryProgress(territory: Territory) {
 
 export function isTerritoryAvailable(territory: Territory) {
   return !territory.activeReservation && !territory.lockedReason;
+}
+
+export const passwordRequirements = [
+  { id: "length", label: "Al menos 8 caracteres", test: (value: string) => value.length >= 8 },
+  { id: "upper", label: "Una mayuscula", test: (value: string) => /[A-Z]/.test(value) },
+  { id: "lower", label: "Una minuscula", test: (value: string) => /[a-z]/.test(value) },
+  { id: "digit", label: "Un numero", test: (value: string) => /\d/.test(value) },
+  { id: "special", label: "Un caracter especial", test: (value: string) => /[^A-Za-z0-9]/.test(value) },
+] as const;
+
+export function isPasswordValid(password: string) {
+  return passwordRequirements.every((requirement) => requirement.test(password));
+}
+
+export function isEmailValid(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 export function formatPendingBlocks(labels: string[]) {

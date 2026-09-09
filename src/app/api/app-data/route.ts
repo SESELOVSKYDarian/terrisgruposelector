@@ -243,7 +243,7 @@ export async function GET() {
       supabase.from("annual_rounds").select("*").order("year", { ascending: false }).order("opened_at", { ascending: false }),
       supabase.from("block_round_statuses").select("*, blocks(label,territory_id,territories(number,name))").order("updated_at", { ascending: false }),
       isAdmin
-        ? supabase.from("profiles").select("id, username, full_name, active, must_change_password, password_updated_at, group_id, groups(name), profile_roles(role)").order("full_name")
+        ? supabase.from("profiles").select("id, username, full_name, email, active, must_change_password, approval_status, password_updated_at, group_id, groups(name), profile_roles(role)").order("full_name")
         : Promise.resolve({ data: [], error: null }),
       isAdmin
         ? supabase
@@ -854,6 +854,7 @@ export async function POST(request: Request) {
       const { data: created, error } = await supabase.from("profiles").insert({
         username: String(payload?.username ?? "").trim(),
         full_name: String(payload?.full_name ?? "").trim(),
+        email: payload?.email ? String(payload.email).trim().toLowerCase() : null,
         group_id: payload?.group_id ? String(payload.group_id) : null,
         role: validRoles.includes("ADMIN") ? "ADMIN" : "ANCIANO",
         active: true,
@@ -873,7 +874,15 @@ export async function POST(request: Request) {
 
     if (action === "updateUser") {
       const patch: Record<string, unknown> = {};
+      if (payload?.username !== undefined) {
+        const nextUsername = String(payload.username).trim();
+        if (!nextUsername) return fail("El usuario no puede estar vacio.", 422);
+        const { data: existing } = await supabase.from("profiles").select("id").eq("username", nextUsername).neq("id", String(payload?.id)).maybeSingle();
+        if (existing) return fail("Ese usuario ya existe.", 409);
+        patch.username = nextUsername;
+      }
       if (payload?.full_name !== undefined) patch.full_name = String(payload.full_name);
+      if (payload?.email !== undefined) patch.email = payload.email ? String(payload.email).trim().toLowerCase() : null;
       if (payload?.group_id !== undefined) patch.group_id = payload.group_id ? String(payload.group_id) : null;
       if (payload?.active !== undefined) patch.active = Boolean(payload.active);
       const password = String(payload?.password ?? "");
@@ -902,6 +911,12 @@ export async function POST(request: Request) {
         const { error } = await supabase.from("profiles").update(patch).eq("id", String(payload?.id));
         if (error) return fail(error.message);
       }
+      return ok();
+    }
+
+    if (action === "approveUser") {
+      const { error } = await supabase.from("profiles").update({ approval_status: "approved" }).eq("id", String(payload?.id));
+      if (error) return fail(error.message);
       return ok();
     }
 

@@ -7,6 +7,7 @@ import {
   Bell,
   CalendarClock,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -33,6 +34,17 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { startAuthentication } from "@simplewebauthn/browser";
+import { AuthChoiceScreen } from "./_components/auth/auth-choice-screen";
+import { ForcePasswordChangeScreen } from "./_components/auth/force-password-change-screen";
+import { ForgotPasswordCard } from "./_components/auth/forgot-password-card";
+import { LoginCard } from "./_components/auth/login-card";
+import { OtpCard } from "./_components/auth/otp-card";
+import { PasskeyPromptModal } from "./_components/auth/passkey-prompt-modal";
+import { PendingApprovalScreen } from "./_components/auth/pending-approval-screen";
+import { RegisterCard } from "./_components/auth/register-card";
+import { ThemeToggle } from "./_components/theme-toggle";
+import { compactSelectClass, inputClass, miniButtonClass, primaryButtonClass, primarySmallButtonClass, secondaryButtonClass, tabClass } from "./_components/ui-classes";
 import {
   formatPendingBlocks,
   reservationStatusLabels,
@@ -52,11 +64,13 @@ type Profile = {
   id: string;
   username: string;
   full_name: string;
+  email: string | null;
   group_id: string | null;
   groups?: Pick<Group, "name"> | null;
   roles: Role[];
   active: boolean;
   must_change_password: boolean;
+  approval_status: "pending" | "approved";
 };
 type Territory = { id: string; number: number; name: string; active: boolean };
 type Block = { id: string; territory_id: string; label: string; active: boolean };
@@ -226,10 +240,12 @@ const emptyProfile: Profile = {
   id: "",
   username: "",
   full_name: "",
+  email: null,
   group_id: null,
   roles: [],
   active: false,
   must_change_password: false,
+  approval_status: "approved",
 };
 const emptyData: AppData = {
   profile: emptyProfile,
@@ -307,6 +323,16 @@ export default function Home() {
   const [passwordMode, setPasswordMode] = useState<"manual" | "generate">("generate");
   const [loadedAt, setLoadedAt] = useState(0);
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  const [authView, setAuthView] = useState<"choice" | "login" | "register" | "otp" | "forgot" | "pending">("choice");
+  const [authError, setAuthError] = useState("");
+  const [otpResent, setOtpResent] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
+  const [hasPasskeyHint, setHasPasskeyHint] = useState(false);
+
+  useEffect(() => {
+    setHasPasskeyHint(document.cookie.includes("terris_has_passkey=1"));
+  }, []);
 
   const isAdmin = Boolean(profile?.roles.includes("ADMIN"));
   const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
@@ -338,25 +364,101 @@ export default function Home() {
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleLoginSubmit(username: string, password: string, deviceSecure: boolean) {
     setSaving(true);
-    const form = new FormData(event.currentTarget);
+    setAuthError("");
     try {
-      await requestJson("/api/auth/login", {
+      const result = await requestJson("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({
-          username: String(form.get("username") ?? ""),
-          password: String(form.get("password") ?? ""),
-        }),
+        body: JSON.stringify({ username, password, deviceSecure }),
       });
+      if (result.status === "otp") {
+        setAuthView("otp");
+        setOtpResent(false);
+        return;
+      }
+      if (result.status === "pending") {
+        setAuthView("pending");
+        return;
+      }
+      await loadData({ throwOnError: true });
+      setActiveView("windows");
+      setToast({ type: "success", text: "Sesion iniciada." });
+      if (result.offerPasskey) setShowPasskeyPrompt(true);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "No se pudo ingresar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleOtpSubmit(code: string) {
+    setSaving(true);
+    setAuthError("");
+    try {
+      await requestJson("/api/auth/verify-otp", { method: "POST", body: JSON.stringify({ code }) });
+      await loadData({ throwOnError: true });
+      setActiveView("windows");
+      setAuthView("login");
+      setToast({ type: "success", text: "Sesion iniciada." });
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Codigo incorrecto.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    setAuthError("");
+    try {
+      await requestJson("/api/auth/resend-otp", { method: "POST", body: "{}" });
+      setOtpResent(true);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "No se pudo reenviar el codigo.");
+    }
+  }
+
+  async function handleForgotPassword(usernameOrEmail: string) {
+    setSaving(true);
+    try {
+      await requestJson("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ usernameOrEmail }) });
+      setForgotSent(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRegisterSubmit(username: string, fullName: string, email: string, password: string) {
+    setSaving(true);
+    setAuthError("");
+    try {
+      await requestJson("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, full_name: fullName, email, password }),
+      });
+      setAuthView("pending");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "No se pudo crear la cuenta.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleChangePasswordDone() {
+    await loadData({ throwOnError: true });
+  }
+
+  async function handlePasskeyLogin() {
+    setAuthError("");
+    try {
+      const optionsJSON = await requestJson("/api/auth/passkey/login-options", { method: "POST", body: "{}" });
+      const assertion = await startAuthentication({ optionsJSON });
+      await requestJson("/api/auth/passkey/login-verify", { method: "POST", body: JSON.stringify(assertion) });
       await loadData({ throwOnError: true });
       setActiveView("windows");
       setToast({ type: "success", text: "Sesion iniciada." });
     } catch (error) {
-      setToast({ type: "error", text: error instanceof Error ? error.message : "No se pudo ingresar." });
-    } finally {
-      setSaving(false);
+      setAuthError(error instanceof Error ? error.message : "No se pudo ingresar con la llave de acceso.");
     }
   }
 
@@ -364,6 +466,8 @@ export default function Home() {
     await requestJson("/api/auth/logout", { method: "POST", body: "{}" });
     setProfile(null);
     setData(emptyData);
+    setAuthView("choice");
+    setAuthError("");
   }
 
   const silentActions = new Set([
@@ -431,30 +535,80 @@ export default function Home() {
 
   if (!profile) {
     return (
-      <main className="relative z-10 grid min-h-screen place-items-center px-4 py-8 text-slate-100">
+      <>
         <Toast toast={toast} onClose={() => setToast(null)} />
-        <section className="glass-panel floating-card w-full max-w-md rounded-[1.75rem] p-6 sm:p-7">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary-hover shadow-[0_0_0_1px_rgba(94,106,210,0.08)]">
-            <ShieldCheck size={22} aria-hidden="true" />
-          </span>
-          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-primary-hover/90">Peralta Ramos</p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Ingresar</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-300">Usa tu usuario interno y contrasena asignada.</p>
-          <form className="mt-7 space-y-4" onSubmit={login}>
-            <Field label="Usuario"><input className={inputClass} name="username" autoComplete="username" required /></Field>
-            <Field label="Contrasena"><input className={inputClass} name="password" type="password" autoComplete="current-password" required /></Field>
-            <button className={primaryButtonClass} disabled={saving || loading} type="submit">
-              <KeyRound size={18} aria-hidden="true" />
-              {saving || loading ? "Ingresando..." : "Ingresar"}
-            </button>
-          </form>
-        </section>
-      </main>
+        {authView === "register" ? (
+          <RegisterCard
+            error={authError}
+            loading={saving}
+            onBack={() => {
+              setAuthView("choice");
+              setAuthError("");
+            }}
+            onLogin={() => {
+              setAuthView("login");
+              setAuthError("");
+            }}
+            onSubmit={handleRegisterSubmit}
+          />
+        ) : authView === "pending" ? (
+          <PendingApprovalScreen onBack={() => setAuthView("choice")} />
+        ) : authView === "otp" ? (
+          <OtpCard
+            error={authError}
+            loading={saving}
+            onBack={() => {
+              setAuthView("login");
+              setAuthError("");
+            }}
+            onResend={handleResendOtp}
+            onSubmit={handleOtpSubmit}
+            resent={otpResent}
+          />
+        ) : authView === "forgot" ? (
+          <ForgotPasswordCard
+            loading={saving}
+            onBack={() => {
+              setAuthView("login");
+              setForgotSent(false);
+            }}
+            onSubmit={handleForgotPassword}
+            sent={forgotSent}
+          />
+        ) : authView === "login" ? (
+          <LoginCard
+            error={authError}
+            hasPasskeyHint={hasPasskeyHint}
+            loading={saving || loading}
+            onBack={() => {
+              setAuthView("choice");
+              setAuthError("");
+            }}
+            onForgotPassword={() => {
+              setAuthView("forgot");
+              setAuthError("");
+            }}
+            onPasskeyLogin={handlePasskeyLogin}
+            onRegister={() => {
+              setAuthView("register");
+              setAuthError("");
+            }}
+            onSubmit={handleLoginSubmit}
+          />
+        ) : (
+          <AuthChoiceScreen onLogin={() => setAuthView("login")} onRegister={() => setAuthView("register")} />
+        )}
+        {showPasskeyPrompt ? <PasskeyPromptModal onClose={() => setShowPasskeyPrompt(false)} /> : null}
+      </>
     );
   }
 
+  if (profile.must_change_password) {
+    return <ForcePasswordChangeScreen onDone={handleChangePasswordDone} onLogout={logout} />;
+  }
+
   return (
-    <main className="relative z-10 min-h-screen text-slate-100">
+    <main className="relative z-10 min-h-screen text-foreground">
       <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
@@ -490,14 +644,15 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{profile.full_name}</h1>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted">PR Territorios</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{profile.full_name}</h1>
                 <div className="mt-3 flex gap-2">
                   <button className={tabClass(activeView !== "conductorVisit")} onClick={() => setActiveView("reservations")} type="button">Reservas</button>
                   <button className={tabClass(activeView === "conductorVisit")} onClick={() => setActiveView("conductorVisit")} type="button">Actualizar territorio</button>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <ThemeToggle />
                 <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
                   <RefreshCw size={18} aria-hidden="true" />Actualizar
                 </button>
@@ -516,11 +671,12 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Actualizar territorio</h1>
-                <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted">PR Territorios</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Actualizar territorio</h1>
+                <p className="mt-2 text-sm text-muted">{profile.full_name}</p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <ThemeToggle />
                 <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
                   <RefreshCw size={18} aria-hidden="true" />Actualizar
                 </button>
@@ -535,13 +691,14 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Reservas de mi grupo</h1>
-                <p className="mt-2 text-sm text-slate-400">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted">PR Territorios</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Reservas de mi grupo</h1>
+                <p className="mt-2 text-sm text-muted">
                   {profile.full_name} - {data.groups[0]?.name ?? "Sin grupo asignado"}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <ThemeToggle />
                 <button className={secondaryButtonClass} onClick={() => void loadData()} type="button">
                   <RefreshCw size={18} aria-hidden="true" />Actualizar
                 </button>
@@ -556,12 +713,15 @@ export default function Home() {
           <>
             <header className="glass-panel flex flex-col gap-4 rounded-[1.75rem] p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Peralta Ramos</p>
-                <p className="mt-2 text-sm text-slate-400">{profile.full_name}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted">PR Territorios</p>
+                <p className="mt-2 text-sm text-muted">{profile.full_name}</p>
               </div>
-              <button className={secondaryButtonClass} onClick={logout} type="button">
-                <LogOut size={18} aria-hidden="true" />Salir
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <ThemeToggle />
+                <button className={secondaryButtonClass} onClick={logout} type="button">
+                  <LogOut size={18} aria-hidden="true" />Salir
+                </button>
+              </div>
             </header>
             <EmptyState icon={<ShieldCheck size={24} />} title="No tenes secciones asignadas" text="Contacta al administrador para que te asigne un rol." />
           </>
@@ -636,19 +796,19 @@ function AdminNav({
   return (
     <aside className="admin-sidebar glass-panel flex min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]" aria-label="Administracion">
       <div className="flex shrink-0 items-center gap-3 px-2 py-2">
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white text-black">
-          <ShieldCheck size={19} aria-hidden="true" />
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-border bg-foreground/[0.04] p-1.5">
+          <img alt="PR Territorios" className="h-full w-full object-contain" src="/PR.svg" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-white">Peralta Ramos</p>
-          <p className="truncate text-xs text-slate-500">Administración</p>
+          <p className="truncate text-sm font-semibold text-foreground">PR Territorios</p>
+          <p className="truncate text-xs text-muted">Administración</p>
         </div>
       </div>
 
       <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3 lg:overflow-y-auto lg:pb-0" aria-label="Secciones">
         {tabGroups.map((group, index) => (
           <div className="shrink-0 lg:space-y-1" key={group.label || `group-${index}`}>
-            {group.label ? <p className="hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 lg:block">{group.label}</p> : null}
+            {group.label ? <p className="hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted lg:block">{group.label}</p> : null}
             {group.items.map(({ id, label, icon }) => (
               <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
                 <span className="shrink-0">{icon}</span>
@@ -696,9 +856,10 @@ function AdminTopbar({
   };
   return (
     <header className="glass-panel flex min-h-16 flex-wrap items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
-      <h1 className="truncate text-lg font-semibold tracking-tight text-white">{sectionLabels[activeView] ?? "Administración"}</h1>
+      <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{sectionLabels[activeView] ?? "Administración"}</h1>
       <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-none">
         <TopbarSearch data={data} setActiveView={setActiveView} setModal={setModal} />
+        <ThemeToggle />
         <NotificationsBell data={data} mutate={mutate} />
         <AccountMenu currentUser={currentUser} onLogout={onLogout} />
       </div>
@@ -1292,6 +1453,10 @@ function GroupsPanel({
   );
 }
 
+function roleLabel(role: Role) {
+  return role === "ADMIN" ? "Super admin" : role === "CONDUCTOR" ? "Conductor" : role === "PUBLICADOR" ? "Publicador" : "Anciano";
+}
+
 function UsersPanel({
   data,
   mutate,
@@ -1301,35 +1466,74 @@ function UsersPanel({
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
   setModal: (modal: ModalState) => void;
 }) {
+  const pendingProfiles = data.profiles.filter((item) => item.approval_status === "pending");
+  const approvedProfiles = data.profiles.filter((item) => item.approval_status !== "pending");
+
+  const pendingControls = useListControls({
+    items: pendingProfiles,
+    searchText: (item) => `${item.username} ${item.full_name} ${item.email ?? ""}`,
+  });
   const controls = useListControls({
-    items: data.profiles,
+    items: approvedProfiles,
     searchText: (item) => `${item.username} ${item.full_name} ${item.groups?.name ?? ""}`,
   });
 
   return (
-    <Panel title="Usuarios" description="Asigna cada anciano a su grupo." action={<AddButton onClick={() => setModal({ type: "user" })}>Usuario</AddButton>}>
-      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por usuario, nombre o grupo..." query={controls.query} />
-      <DataTable headers={["Usuario", "Nombre", "Grupo", "Rol", "Activo", "Estado", "Acciones"]}>
-        {controls.paged.map((item) => (
-          <tr key={item.id}>
-            <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.groups?.name ?? "-"}</Cell>
-            <Cell>
-              <div className="flex flex-wrap gap-1">
-                {item.roles.map((role) => (
-                  <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
-                    {role === "ADMIN" ? "Super admin" : role === "CONDUCTOR" ? "Conductor" : "Anciano"}
-                  </Badge>
-                ))}
-              </div>
-            </Cell>
-            <Cell>{item.active ? "Si" : "No"}</Cell>
-            <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-            <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
-          </tr>
-        ))}
-      </DataTable>
-      <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
-    </Panel>
+    <div className="space-y-4">
+      {pendingProfiles.length ? (
+        <Panel title="Por aprobar" description="Cuentas creadas por auto-registro, esperando revision.">
+          <ListToolbar onQueryChange={pendingControls.setQuery} placeholder="Buscar por usuario, nombre o mail..." query={pendingControls.query} />
+          <DataTable headers={["Usuario", "Nombre", "Mail", "Rol", "Acciones"]}>
+            {pendingControls.paged.map((item) => (
+              <tr key={item.id}>
+                <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.email ?? "-"}</Cell>
+                <Cell>
+                  <div className="flex flex-wrap gap-1">
+                    {item.roles.map((role) => (
+                      <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
+                        {roleLabel(role)}
+                      </Badge>
+                    ))}
+                  </div>
+                </Cell>
+                <Actions>
+                  <IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton>
+                  <button className={miniButtonClass} onClick={() => void mutate("approveUser", { id: item.id })} type="button">
+                    <Check size={14} aria-hidden="true" />Aprobar
+                  </button>
+                  <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} />
+                </Actions>
+              </tr>
+            ))}
+          </DataTable>
+          <PaginationBar page={pendingControls.page} pageSize={pendingControls.pageSize} total={pendingControls.total} totalPages={pendingControls.totalPages} onPageChange={pendingControls.setPage} />
+        </Panel>
+      ) : null}
+
+      <Panel title="Usuarios" description="Asigna cada anciano a su grupo." action={<AddButton onClick={() => setModal({ type: "user" })}>Usuario</AddButton>}>
+        <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por usuario, nombre o grupo..." query={controls.query} />
+        <DataTable headers={["Usuario", "Nombre", "Mail", "Grupo", "Rol", "Activo", "Estado", "Acciones"]}>
+          {controls.paged.map((item) => (
+            <tr key={item.id}>
+              <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.email ?? <span className="text-muted">Sin mail</span>}</Cell><Cell>{item.groups?.name ?? "-"}</Cell>
+              <Cell>
+                <div className="flex flex-wrap gap-1">
+                  {item.roles.map((role) => (
+                    <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
+                      {roleLabel(role)}
+                    </Badge>
+                  ))}
+                </div>
+              </Cell>
+              <Cell>{item.active ? "Si" : "No"}</Cell>
+              <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
+              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+            </tr>
+          ))}
+        </DataTable>
+        <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
+      </Panel>
+    </div>
   );
 }
 
@@ -1645,7 +1849,7 @@ function renderModal({
         ) : (
           <fieldset>
             <legend className="text-sm font-medium text-slate-200">Territorios disponibles</legend>
-            <p className="mt-2 text-sm text-slate-400">Selecciona uno o varios territorios para esta fecha. Los ya ocupados o completados quedan bloqueados automáticamente.</p>
+            <p className="mt-2 text-sm text-muted">Selecciona uno o varios territorios para esta fecha. Los ya ocupados o completados quedan bloqueados automáticamente.</p>
             <div className="mt-3">
               <TerritoryChoiceList
                 blockedIds={unavailable}
@@ -1669,6 +1873,7 @@ function renderModal({
           id: modal.item?.id,
           username: form.get("username"),
           full_name: form.get("full_name"),
+          email: form.get("email") || null,
           group_id: form.get("group_id") || null,
           roles: form.getAll("roles"),
           active: form.get("active") === "true",
@@ -1677,8 +1882,9 @@ function renderModal({
         }))}
         saving={saving}
       >
-        {!modal.item ? <Field label="Usuario"><input className={inputClass} name="username" required /></Field> : null}
+        <Field label="Usuario"><input className={inputClass} defaultValue={modal.item?.username} name="username" required /></Field>
         <Field label="Nombre completo"><input className={inputClass} name="full_name" defaultValue={modal.item?.full_name} required /></Field>
+        <Field label="Mail"><input className={inputClass} name="email" type="email" defaultValue={modal.item?.email ?? ""} placeholder="Para verificacion por codigo y llave de acceso" /></Field>
         <Field label="Grupo"><select className={inputClass} name="group_id" defaultValue={modal.item?.group_id ?? ""}><option value="">Sin grupo</option>{data.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></Field>
         <fieldset>
           <legend className="text-sm font-medium text-slate-200">Roles</legend>
@@ -2772,16 +2978,6 @@ function TerritoryBlocksModal({
   );
 }
 
-const inputClass = "mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-primary/60 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-zinc-950 disabled:text-slate-600";
-const primaryButtonClass = "inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-primary px-4 py-3 text-sm font-medium text-white transition hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a] disabled:cursor-not-allowed disabled:opacity-60";
-const primarySmallButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a] disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButtonClass = "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
-const miniButtonClass = "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30";
-const compactSelectClass = "min-h-10 cursor-pointer rounded-lg border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-white/20 focus:ring-4 focus:ring-white/6 disabled:cursor-not-allowed disabled:bg-zinc-950";
-
-function tabClass(active: boolean) {
-  return cn("inline-flex min-h-11 w-auto shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 lg:w-full", active ? "border-white/12 bg-white/[0.09] text-white" : "border-transparent bg-transparent text-slate-400 hover:bg-white/[0.045] hover:text-white");
-}
 function SmoothCursor() {
   const cursorRef = useRef<HTMLDivElement>(null);
 
@@ -2819,7 +3015,7 @@ function SmoothCursor() {
   return <div className="smooth-cursor" ref={cursorRef} aria-hidden="true" />;
 }
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="block text-sm font-medium text-slate-200">{label}{children}</label>;
+  return <label className="block text-sm font-medium text-foreground/90">{label}{children}</label>;
 }
 function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: string } | null; onClose: () => void }) {
   if (!toast) return null;
@@ -2830,10 +3026,10 @@ function Toast({ toast, onClose }: { toast: { type: "success" | "error"; text: s
         {success ? <CheckCircle2 size={19} aria-hidden="true" /> : <TriangleAlert size={19} aria-hidden="true" />}
       </span>
       <div className="min-w-0 pt-0.5">
-        <p className="text-sm font-semibold text-white">{success ? "Cambios aplicados" : "No se pudo completar"}</p>
-        <p className="mt-1 text-sm leading-5 text-slate-400">{toast.text}</p>
+        <p className="text-sm font-semibold text-foreground">{success ? "Cambios aplicados" : "No se pudo completar"}</p>
+        <p className="mt-1 text-sm leading-5 text-muted">{toast.text}</p>
       </div>
-      <button className="absolute right-2.5 top-2.5 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClose} type="button" aria-label="Cerrar aviso"><X size={15} /></button>
+      <button className="absolute right-2.5 top-2.5 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={onClose} type="button" aria-label="Cerrar aviso"><X size={15} /></button>
       <span className={cn("toast-progress absolute inset-x-0 bottom-0 h-0.5 origin-left", success ? "bg-emerald-400" : "bg-rose-400")} aria-hidden="true" />
     </div>
   );
@@ -2850,14 +3046,14 @@ function ConfirmationModal({
   if (!confirmation) return null;
   const destructive = confirmation.tone === "danger";
   return (
-    <div className="modal-overlay fixed inset-0 z-[70] grid place-items-center bg-black/80 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <div className="modal-overlay fixed inset-0 z-[70] grid place-items-center bg-[var(--overlay-strong)] px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <div className={cn("modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border", destructive ? "border-rose-400/25" : "border-sky-400/20")} role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-description">
         <div className="p-5 sm:p-6">
           <span className={cn("inline-flex h-12 w-12 items-center justify-center rounded-2xl border", destructive ? "border-rose-400/20 bg-rose-500/12 text-rose-300" : "border-sky-400/20 bg-sky-500/12 text-sky-300")}>
             {destructive ? <TriangleAlert size={22} aria-hidden="true" /> : <Save size={22} aria-hidden="true" />}
           </span>
-          <h2 className="mt-5 text-xl font-semibold tracking-tight text-white" id="confirmation-title">{confirmation.title}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400" id="confirmation-description">{confirmation.description}</p>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-foreground" id="confirmation-title">{confirmation.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-muted" id="confirmation-description">{confirmation.description}</p>
           <div className="mt-6 grid gap-2 sm:grid-cols-2">
             <button className={secondaryButtonClass} onClick={onCancel} type="button">Cancelar</button>
             <button className={cn(primarySmallButtonClass, destructive && "border-rose-300/20 bg-rose-500 text-white hover:bg-rose-400")} onClick={onConfirm} type="button">{confirmation.confirmLabel}</button>
@@ -2881,7 +3077,7 @@ function TemporaryPasswordModal({ password, onClose }: { password: string; onClo
     window.setTimeout(onClose, 180);
   };
   if (!password) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/68 px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-white/10 p-5"><h2 className="text-xl font-semibold text-white">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-slate-300">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-border p-5"><h2 className="text-xl font-semibold text-foreground">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-muted">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
 }
 function AddButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;
@@ -2912,22 +3108,22 @@ function Metric({
     <article className="glass-panel-soft floating-card rounded-[1.5rem] p-4">
       <div className="flex items-start justify-between gap-3">
         <span className={cn("inline-flex h-11 w-11 items-center justify-center rounded-2xl border", tones[tone])}>{icon}</span>
-        <p className="text-3xl font-semibold tracking-tight text-white">{value}</p>
+        <p className="text-3xl font-semibold tracking-tight text-foreground">{value}</p>
       </div>
-      <p className="mt-4 text-sm font-semibold text-slate-200">{label}</p>
-      <p className="mt-1 text-xs text-slate-500">{detail}</p>
-      {typeof progress === "number" ? <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className={cn("h-full rounded-full transition-[width] duration-500", bars[tone])} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div> : null}
+      <p className="mt-4 text-sm font-semibold text-foreground/90">{label}</p>
+      <p className="mt-1 text-xs text-muted">{detail}</p>
+      {typeof progress === "number" ? <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-foreground/[0.06]"><div className={cn("h-full rounded-full transition-[width] duration-500", bars[tone])} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div> : null}
     </article>
   );
 }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white">{icon}</span><h2 className="mt-4 text-lg font-semibold text-white">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">{text}</p></section>;
+  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-foreground/[0.04] text-foreground">{icon}</span><h2 className="mt-4 text-lg font-semibold text-foreground">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">{text}</p></section>;
 }
 function Panel({ title, description, action, children }: { title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-white">{title}</h2><p className="mt-1 text-sm text-slate-300">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
+  return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="mt-1 text-sm text-muted">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
 }
 function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return <div className="overflow-x-auto rounded-2xl border border-white/8 bg-black/10"><table className="w-full min-w-[760px] border-collapse text-left text-sm text-slate-200"><thead className="bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-slate-400"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-white/8">{children}</tbody></table></div>;
+  return <div className="overflow-x-auto rounded-2xl border border-border bg-foreground/[0.02]"><table className="w-full min-w-[760px] border-collapse text-left text-sm text-foreground/90"><thead className="bg-foreground/[0.04] text-xs uppercase tracking-[0.12em] text-muted"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-border">{children}</tbody></table></div>;
 }
 function Cell({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3 align-middle">{children}</td>;
@@ -2939,7 +3135,7 @@ function Badge({ children, className }: { children: React.ReactNode; className: 
   return <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", className)}>{children}</span>;
 }
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 text-slate-200 transition hover:border-white/18 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-border bg-foreground/[0.04] px-3 text-foreground/90 transition hover:border-foreground/18 hover:bg-foreground/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
 }
 function DeleteButton({ onClick, label = "Eliminar" }: { onClick: () => void; label?: string }) {
   return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
@@ -2955,8 +3151,8 @@ function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: 
     window.setTimeout(onClose, 180);
   };
   if (!modal) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" || modal.type === "territoryVisit" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-white/10 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition-colors duration-200 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" || modal.type === "territoryVisit" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-border p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors duration-200 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
 function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
-  return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-300">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;
+  return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-foreground">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;
 }

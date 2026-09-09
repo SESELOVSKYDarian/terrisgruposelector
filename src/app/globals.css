@@ -13,29 +13,59 @@
   --primary-strong: #4d58c2;
   --success: #34d399;
   --danger: #fb7185;
+  --glow: rgba(94, 106, 210, 0.1);
+  --overlay-strong: rgba(0, 0, 0, 0.8);
+  --overlay-soft: rgba(0, 0, 0, 0.78);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --background: #f6f6f7;
+  --background-soft: #ffffff;
+  --foreground: #1b1c1f;
+  --muted: #6b7076;
+  --border: rgba(15, 16, 20, 0.1);
+  --surface: #ffffff;
+  --surface-strong: #f0f0f2;
+  --primary: #5e6ad2;
+  --primary-hover: #4d58c2;
+  --primary-strong: #3f49ab;
+  --success: #0f9d67;
+  --danger: #d4374a;
+  --glow: rgba(94, 106, 210, 0.06);
+  --overlay-strong: rgba(15, 16, 20, 0.45);
+  --overlay-soft: rgba(15, 16, 20, 0.4);
+  color-scheme: light;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-soft: var(--background-soft);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-strong: var(--primary-strong);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
 html {
-  color-scheme: dark;
   scroll-behavior: smooth;
 }
 
 body {
   min-height: 100vh;
-  background: radial-gradient(circle at 100% 0%, rgba(94, 106, 210, 0.10), transparent 26rem), var(--background);
+  background: radial-gradient(circle at 100% 0%, var(--glow), transparent 26rem), var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   letter-spacing: -0.05px;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 button,

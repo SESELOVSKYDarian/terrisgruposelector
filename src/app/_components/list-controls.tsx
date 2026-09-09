@@ -106,9 +106,9 @@ export function ListToolbar({
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <div className="relative min-w-[200px] flex-1">
-        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={15} />
+        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={15} />
         <input
-          className="h-10 w-full rounded-lg border border-white/10 bg-black/20 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+          className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm text-foreground outline-none transition placeholder:text-muted focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={placeholder}
           value={query}
@@ -117,26 +117,26 @@ export function ListToolbar({
       {showDateFilter ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <input
-            className="h-10 rounded-lg border border-white/10 bg-black/20 px-2.5 text-sm text-white outline-none transition focus:border-primary/50"
+            className="h-10 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground outline-none transition focus:border-primary/50"
             onChange={(event) => onDateFromChange?.(event.target.value)}
             type="date"
             value={dateFrom ?? ""}
           />
-          <span className="text-xs text-slate-500">a</span>
+          <span className="text-xs text-muted">a</span>
           <input
-            className="h-10 rounded-lg border border-white/10 bg-black/20 px-2.5 text-sm text-white outline-none transition focus:border-primary/50"
+            className="h-10 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground outline-none transition focus:border-primary/50"
             onChange={(event) => onDateToChange?.(event.target.value)}
             type="date"
             value={dateTo ?? ""}
           />
-          <button className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-white" onClick={() => onQuickRange?.(7)} type="button">
+          <button className="rounded-lg border border-border bg-foreground/[0.04] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.08] hover:text-foreground" onClick={() => onQuickRange?.(7)} type="button">
             Ultima semana
           </button>
-          <button className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-white" onClick={() => onQuickRange?.(30)} type="button">
+          <button className="rounded-lg border border-border bg-foreground/[0.04] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.08] hover:text-foreground" onClick={() => onQuickRange?.(30)} type="button">
             Ultimo mes
           </button>
           {dateFrom || dateTo ? (
-            <button className="rounded-lg px-2 py-2 text-xs font-medium text-slate-500 transition hover:text-white" onClick={() => onQuickRange?.(null)} type="button">
+            <button className="rounded-lg px-2 py-2 text-xs font-medium text-muted transition hover:text-foreground" onClick={() => onQuickRange?.(null)} type="button">
               Limpiar
             </button>
           ) : null}
@@ -163,11 +163,11 @@ export function PaginationBar({
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
   return (
-    <div className="mt-3 flex items-center justify-between gap-3 text-sm text-slate-400">
+    <div className="mt-3 flex items-center justify-between gap-3 text-sm text-muted">
       <p>Mostrando {start}-{end} de {total}</p>
       <div className="flex items-center gap-1">
         <button
-          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30")}
+          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-foreground/80 transition hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
           type="button"
@@ -176,7 +176,7 @@ export function PaginationBar({
         </button>
         <span className="px-2 text-xs">Pagina {page} de {totalPages}</span>
         <button
-          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30")}
+          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-foreground/80 transition hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
           type="button"
