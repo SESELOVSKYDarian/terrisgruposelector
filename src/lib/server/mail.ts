@@ -25,8 +25,8 @@ export function otpEmailHtml(code: string) {
 
 export function resetPasswordEmailHtml(link: string) {
   return `<div style="font-family:sans-serif;max-width:420px;margin:0 auto">
-    <p style="font-size:14px;color:#444">Pediste restablecer tu contrasena en PR Territorios.</p>
-    <p><a href="${link}" style="display:inline-block;background:#5e6ad2;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-size:14px">Elegir nueva contrasena</a></p>
+    <p style="font-size:14px;color:#444">Pediste restablecer tu contraseña en PR Territorios.</p>
+    <p><a href="${link}" style="display:inline-block;background:#5e6ad2;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-size:14px">Elegir nueva contraseña</a></p>
     <p style="font-size:12px;color:#888">El link vence en 30 minutos. Si no fuiste vos, ignora este mail.</p>
   </div>`;
 }

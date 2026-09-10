@@ -49,7 +49,7 @@ export function PasskeyPromptModal({ onClose }: { onClose: () => void }) {
         </span>
         <h2 className="mt-5 text-xl font-semibold tracking-tight text-foreground">¿Crear una llave de acceso?</h2>
         <p className="mt-2 text-sm leading-6 text-muted">
-          Usa tu huella, cara o PIN de este dispositivo para volver a entrar sin escribir la contrasena. Si preferis no hacerlo ahora, vamos a recordar este dispositivo por 7 dias.
+          Usa tu huella, cara o PIN de este dispositivo para volver a entrar sin escribir la contraseña. Si preferis no hacerlo ahora, vamos a recordar este dispositivo por 7 dias.
         </p>
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
         <div className="mt-6 grid gap-2 sm:grid-cols-2">

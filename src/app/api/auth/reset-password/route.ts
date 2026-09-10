@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   const { token, password } = (await request.json()) as { token?: string; password?: string };
 
   if (!token || !password || password.length < 8) {
-    return fail("Falta el token o la contrasena es muy corta.", 422);
+    return fail("Falta el token o la contraseña es muy corta.", 422);
   }
 
   const profileId = verifyResetToken(token);

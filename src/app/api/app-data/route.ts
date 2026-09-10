@@ -742,9 +742,13 @@ export async function POST(request: Request) {
     }
 
     if (action === "createDeparturePoint" || action === "updateDeparturePoint") {
+      const availableDays = Array.isArray(payload?.available_days)
+        ? [...new Set(payload.available_days.map((day) => Number(day)).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))]
+        : [];
       const row = {
         name: String(payload?.name ?? "").trim(),
         address: String(payload?.address ?? "").trim(),
+        available_days: availableDays,
         updated_at: new Date().toISOString(),
       };
       if (!row.name || !row.address) return fail("Completa el nombre y la direccion.", 422);
@@ -846,7 +850,7 @@ export async function POST(request: Request) {
     if (action === "createUser") {
       const passwordMode = String(payload?.passwordMode);
       const temporaryPassword = passwordMode === "generate" ? generateTemporaryPassword() : String(payload?.password ?? "");
-      if (temporaryPassword.length < 8) return fail("La contrasena debe tener al menos 8 caracteres.", 422);
+      if (temporaryPassword.length < 8) return fail("La contraseña debe tener al menos 8 caracteres.", 422);
       const requestedRoles = Array.isArray(payload?.roles) ? payload.roles.map((role) => String(role)) : [];
       const validRoles = requestedRoles.filter((role) => roles.includes(role as never));
       if (!validRoles.length) return fail("Selecciona al menos un rol.", 422);
@@ -887,7 +891,7 @@ export async function POST(request: Request) {
       if (payload?.active !== undefined) patch.active = Boolean(payload.active);
       const password = String(payload?.password ?? "");
       if (password) {
-        if (password.length < 8) return fail("La contrasena debe tener al menos 8 caracteres.", 422);
+        if (password.length < 8) return fail("La contraseña debe tener al menos 8 caracteres.", 422);
         patch.password_hash = hashPassword(password);
         patch.must_change_password = Boolean(payload?.must_change_password ?? true);
         patch.password_updated_at = new Date().toISOString();
@@ -1025,13 +1029,14 @@ export async function POST(request: Request) {
         supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
         supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
         supabase.from("weekly_outing_slots").select("id,slot_date,lugar").eq("weekly_outing_id", weeklyOutingId),
-        supabase.from("departure_points").select("address,departure_point_territories(territory_id,sort_order)"),
+        supabase.from("departure_points").select("address,available_days,departure_point_territories(territory_id,sort_order)"),
       ]);
       const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error, departurePointsResult.error].find(Boolean);
       if (firstError) return fail(firstError.message);
 
       const activeTerritoryIds = new Set((territoriesResult.data ?? []).map((territory) => territory.id));
       const territoryIdsByAddress = new Map<string, string[]>();
+      const availableDaysByAddress = new Map<string, number[]>();
       for (const point of departurePointsResult.data ?? []) {
         const key = point.address.trim().toLowerCase();
         const ids = [...(point.departure_point_territories ?? [])]
@@ -1039,6 +1044,7 @@ export async function POST(request: Request) {
           .map((entry) => entry.territory_id)
           .filter((id) => activeTerritoryIds.has(id));
         if (ids.length) territoryIdsByAddress.set(key, ids);
+        if (Array.isArray(point.available_days) && point.available_days.length) availableDaysByAddress.set(key, point.available_days);
       }
 
       const lastCompletedByTerritory = new Map<string, string>();
@@ -1115,10 +1121,20 @@ export async function POST(request: Request) {
         }
       }
 
-      function pickTerritory(avoidAddress: string | null): string | null {
+      function isDayEligible(territoryId: string, isoWeekday: number): boolean {
+        const address = territoryToPointAddress.get(territoryId);
+        if (!address) return true;
+        const days = availableDaysByAddress.get(address.trim().toLowerCase());
+        if (!days || !days.length) return true;
+        return days.includes(isoWeekday);
+      }
+
+      function pickTerritory(avoidAddress: string | null, isoWeekday: number): string | null {
+        const candidates = priorityTerritoryIds.filter((id) => !usedTerritoryIds.has(id));
+        const dayEligible = candidates.filter((id) => isDayEligible(id, isoWeekday));
+        const pool = dayEligible.length ? dayEligible : candidates;
         let fallback: string | null = null;
-        for (const id of priorityTerritoryIds) {
-          if (usedTerritoryIds.has(id)) continue;
+        for (const id of pool) {
           const address = territoryToPointAddress.get(id) ?? null;
           if (!avoidAddress || !address || address !== avoidAddress) return id;
           if (fallback === null) fallback = id;
@@ -1131,9 +1147,11 @@ export async function POST(request: Request) {
       for (const slot of targetSlots) {
         const preAddressKey = slot.lugar ? slot.lugar.trim().toLowerCase() : null;
         const nearby = preAddressKey ? territoryIdsByAddress.get(preAddressKey) : undefined;
+        const jsWeekday = new Date(`${slot.slot_date}T00:00:00Z`).getUTCDay();
+        const isoWeekday = jsWeekday === 0 ? 7 : jsWeekday;
 
         const territoryId = nearby?.find((id) => !usedTerritoryIds.has(id))
-          ?? pickTerritory(preAddressKey ? null : lastAddressByDay.get(slot.slot_date) ?? null);
+          ?? pickTerritory(preAddressKey ? null : lastAddressByDay.get(slot.slot_date) ?? null, isoWeekday);
         if (!territoryId) break;
         usedTerritoryIds.add(territoryId);
 

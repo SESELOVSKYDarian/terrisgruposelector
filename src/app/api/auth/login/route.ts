@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   };
 
   if (!username || !password) {
-    return fail("Usuario y contrasena son obligatorios.", 422);
+    return fail("Usuario y contraseña son obligatorios.", 422);
   }
 
   const supabase = createAdminSupabaseClient();
@@ -80,11 +80,11 @@ export async function POST(request: Request) {
   }
 
   if (!existingProfile || !existingProfile.active) {
-    return fail("Usuario o contrasena incorrectos.", 401);
+    return fail("Usuario o contraseña incorrectos.", 401);
   }
 
   if (!verifyPassword(password, existingProfile.password_hash ?? "")) {
-    return fail("Usuario o contrasena incorrectos.", 401);
+    return fail("Usuario o contraseña incorrectos.", 401);
   }
 
   if (existingProfile.approval_status === "pending") {

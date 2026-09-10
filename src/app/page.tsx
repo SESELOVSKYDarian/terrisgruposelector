@@ -48,6 +48,9 @@ import { ThemeToggle } from "./_components/theme-toggle";
 import { compactSelectClass, inputClass, miniButtonClass, primaryButtonClass, primarySmallButtonClass, secondaryButtonClass, tabClass } from "./_components/ui-classes";
 import {
   formatPendingBlocks,
+  isoWeekdayLabels,
+  isoWeekdayShortLabels,
+  isoWeekdays,
   reservationStatusLabels,
   serviceDayLabels,
   type BlockStatus,
@@ -181,6 +184,7 @@ type DeparturePoint = {
   id: string;
   name: string;
   address: string;
+  available_days: number[];
   departure_point_territories: {
     territory_id: string;
     sort_order: number;
@@ -533,12 +537,12 @@ export default function Home() {
 
   if (!profile) {
     return (
-      <>
+      <div className="h-dvh w-full overflow-hidden">
         <Toast toast={toast} onClose={() => setToast(null)} />
         <AnimatePresence custom={authDirection} mode="wait">
         <motion.div
           animate="center"
-          className="h-dvh"
+          className="h-dvh overflow-hidden"
           custom={authDirection}
           exit="exit"
           initial="enter"
@@ -614,7 +618,7 @@ export default function Home() {
         </motion.div>
         </AnimatePresence>
         {showPasskeyPrompt ? <PasskeyPromptModal onClose={() => setShowPasskeyPrompt(false)} /> : null}
-      </>
+      </div>
     );
   }
 
@@ -1412,13 +1416,24 @@ function DeparturePointsPanel({
   return (
     <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los territorios asociados son los mas cercanos a esa zona, en orden — el generador automatico de Salidas semanales los usa para elegir bien." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
       <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por nombre o direccion..." query={controls.query} />
-      <DataTable headers={["Nombre", "Direccion", "Territorios cercanos (de mas a menos)", "Acciones"]}>
+      <DataTable headers={["Nombre", "Direccion", "Dias", "Territorios cercanos (de mas a menos)", "Acciones"]}>
         {controls.paged.map((point) => {
           const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
           return (
             <tr key={point.id}>
               <Cell><strong>{point.name}</strong></Cell>
               <Cell>{point.address}</Cell>
+              <Cell>
+                {point.available_days.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {[...point.available_days].sort((a, b) => a - b).map((day) => (
+                      <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={day}>{isoWeekdayShortLabels[day]}</Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-slate-500">Sin definir</span>
+                )}
+              </Cell>
               <Cell>
                 {territories.length ? (
                   <div className="flex flex-wrap items-center gap-1">
@@ -1542,7 +1557,7 @@ function UsersPanel({
               </Cell>
               <Cell>{item.active ? "Si" : "No"}</Cell>
               <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contrasena" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
             </tr>
           ))}
         </DataTable>
@@ -1580,6 +1595,16 @@ function ReservationCollection({
   const clampedWindowPage = Math.min(windowPage, totalWindowPages);
   const pagedWindows = windows.slice((clampedWindowPage - 1) * WINDOWS_PER_PAGE, clampedWindowPage * WINDOWS_PER_PAGE);
 
+  const [expandedWindows, setExpandedWindows] = useState<Set<string>>(new Set());
+  function toggleWindow(id: string) {
+    setExpandedWindows((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <section className="space-y-4" aria-label={blocked ? "Bloqueos por ventana" : "Reservas por ventana"}>
       <div className="px-1">
@@ -1613,21 +1638,28 @@ function ReservationCollection({
         const windowReservations = controls.filtered
           .filter((reservation) => reservation.reservation_window_id === window.id)
           .sort((a, b) => a.service_date.localeCompare(b.service_date) || Number(a.territories?.number ?? 0) - Number(b.territories?.number ?? 0));
+        const expanded = expandedWindows.has(window.id);
         return (
           <article className="glass-panel overflow-hidden rounded-[1.5rem]" key={window.id}>
             <div className="flex flex-col gap-3 border-b border-white/8 bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold text-white">{window.name}</h3>
-                  <Badge className="border-white/10 bg-white/[0.05] text-slate-300">{windowReservations.length} {windowReservations.length === 1 ? "registro" : "registros"}</Badge>
-                </div>
-                <p className="mt-1.5 text-xs text-slate-500">
-                  {[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" · ") || "Sin fechas"}
-                </p>
-              </div>
+              <button className="flex flex-1 items-center gap-3 text-left" onClick={() => toggleWindow(window.id)} type="button">
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300">
+                  {expanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
+                </span>
+                <span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-white">{window.name}</span>
+                    <Badge className="border-white/10 bg-white/[0.05] text-slate-300">{windowReservations.length} {windowReservations.length === 1 ? "registro" : "registros"}</Badge>
+                  </span>
+                  <span className="mt-1.5 block text-xs text-slate-500">
+                    {[window.saturday_date, window.sunday_date].filter(Boolean).map((date) => displayDate(String(date))).join(" · ") || "Sin fechas"}
+                  </span>
+                </span>
+              </button>
               {blocked ? <button className={miniButtonClass} onClick={() => setModal({ type: "adminReservation", window })} type="button"><Plus size={15} />Agregar bloqueo</button> : null}
             </div>
 
+            {expanded ? (
             <div className="grid gap-3 p-3 sm:p-4 xl:grid-cols-2 2xl:grid-cols-3">
               {windowReservations.map((reservation) => {
                 const territory = data.territories.find((item) => item.id === reservation.territory_id);
@@ -1679,6 +1711,7 @@ function ReservationCollection({
                 );
               })}
             </div>
+            ) : null}
           </article>
         );
       })}
@@ -2015,14 +2048,14 @@ function renderModal({
           </div>
         </fieldset>
         {modal.item ? <Field label="Activo"><select className={inputClass} name="active" defaultValue={modal.item.active ? "true" : "false"}><option value="true">Si</option><option value="false">No</option></select></Field> : null}
-        {!modal.item ? <><Field label="Contrasena"><select className={inputClass} value={passwordMode} onChange={(event) => setPasswordMode(event.target.value as "manual" | "generate")}><option value="generate">Generar temporal</option><option value="manual">Escribir manual</option></select></Field><Field label="Contrasena manual"><input className={inputClass} name="password" disabled={passwordMode === "generate"} type="password" /></Field></> : null}
+        {!modal.item ? <><Field label="Contraseña"><select className={inputClass} value={passwordMode} onChange={(event) => setPasswordMode(event.target.value as "manual" | "generate")}><option value="generate">Generar temporal</option><option value="manual">Escribir manual</option></select></Field><Field label="Contraseña manual"><input className={inputClass} name="password" disabled={passwordMode === "generate"} type="password" /></Field></> : null}
       </FormModal>
     );
   }
   if (modal.type === "password") {
     return (
-    <FormModal title={`Cambiar contrasena de @${modal.item.username}`} onSubmit={(event) => submitFromForm(event, "updateUser", (form) => ({ id: modal.item.id, password: form.get("password"), must_change_password: true }))} saving={saving}>
-      <Field label="Nueva contrasena"><input className={inputClass} name="password" type="password" minLength={8} required /></Field>
+    <FormModal title={`Cambiar contraseña de @${modal.item.username}`} onSubmit={(event) => submitFromForm(event, "updateUser", (form) => ({ id: modal.item.id, password: form.get("password"), must_change_password: true }))} saving={saving}>
+      <Field label="Nueva contraseña"><input className={inputClass} name="password" type="password" minLength={8} required /></Field>
       <button className={secondaryButtonClass} type="button" onClick={() => {
         const temp = crypto.getRandomValues(new Uint32Array(3)).join("").slice(0, 12);
         void mutate("updateUser", { id: modal.item.id, password: temp, must_change_password: true }).then((result) => {
@@ -2788,12 +2821,17 @@ function DeparturePointModal({
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [address, setAddress] = useState(item?.address ?? "");
+  const [availableDays, setAvailableDays] = useState<number[]>(() => item?.available_days ?? []);
   const [territoryIds, setTerritoryIds] = useState<string[]>(
     () => [...(item?.departure_point_territories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territory_id),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const availableToAdd = data.territories.filter((territory) => !territoryIds.includes(territory.id));
+
+  function toggleDay(day: number) {
+    setAvailableDays((current) => (current.includes(day) ? current.filter((value) => value !== day) : [...current, day].sort((a, b) => a - b)));
+  }
 
   function addTerritory(id: string) {
     setTerritoryIds((current) => (current.includes(id) ? current : [...current, id]));
@@ -2819,6 +2857,7 @@ function DeparturePointModal({
       id: item?.id,
       name,
       address,
+      available_days: availableDays,
       territory_ids: territoryIds,
     });
   }
@@ -2830,6 +2869,29 @@ function DeparturePointModal({
       <div className="space-y-4">
         <Field label="Nombre"><input className={inputClass} onChange={(event) => setName(event.target.value)} placeholder="Ej. Casa de Fulano" required value={name} /></Field>
         <Field label="Direccion / lugar"><input className={inputClass} onChange={(event) => setAddress(event.target.value)} placeholder="Ej. Calle 123, esquina..." required value={address} /></Field>
+
+        <div>
+          <p className="text-sm font-medium text-slate-200">Dias que se puede salir</p>
+          <p className="mt-1 text-xs text-slate-400">Sin marcar ninguno = sin definir, se puede usar cualquier dia.</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {isoWeekdays.map((day) => {
+              const active = availableDays.includes(day);
+              return (
+                <button
+                  className={cn(
+                    "min-h-9 cursor-pointer rounded-lg border px-3 text-xs font-medium transition",
+                    active ? "border-primary/40 bg-primary/15 text-white" : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/18 hover:bg-white/[0.06]",
+                  )}
+                  key={day}
+                  onClick={() => toggleDay(day)}
+                  type="button"
+                >
+                  {isoWeekdayLabels[day]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div>
           <p className="text-sm font-medium text-slate-200">Territorios cercanos</p>
@@ -3192,7 +3254,7 @@ function TemporaryPasswordModal({ password, onClose }: { password: string; onClo
     void navigator.clipboard?.writeText(password).then(() => setCopied(true));
   }
   if (!password) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-border p-5"><h2 className="text-xl font-semibold text-foreground">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-muted">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={copy}>{copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}{copied ? "Copiado" : "Copiar"}</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-border p-5"><h2 className="text-xl font-semibold text-foreground">Contraseña temporal</h2><p className="mt-2 text-sm leading-6 text-muted">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={copy}>{copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}{copied ? "Copiado" : "Copiar"}</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
 }
 function AddButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;

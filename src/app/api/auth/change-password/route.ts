@@ -10,7 +10,7 @@ export async function POST(request: Request) {
 
   const { newPassword } = (await request.json()) as { newPassword?: string };
   if (!newPassword || !isPasswordValid(newPassword)) {
-    return fail("La contrasena tiene que tener 8 caracteres, mayuscula, minuscula, numero y caracter especial.", 422);
+    return fail("La contraseña tiene que tener 8 caracteres, mayuscula, minuscula, numero y caracter especial.", 422);
   }
 
   const supabase = createAdminSupabaseClient();

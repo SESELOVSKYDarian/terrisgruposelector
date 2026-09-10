@@ -16,6 +16,26 @@ export const reservationStatuses = [
 ] as const;
 export const serviceDays = ["SATURDAY", "SUNDAY"] as const;
 
+export const isoWeekdays = [1, 2, 3, 4, 5, 6, 7] as const;
+export const isoWeekdayLabels: Record<number, string> = {
+  1: "Lunes",
+  2: "Martes",
+  3: "Miercoles",
+  4: "Jueves",
+  5: "Viernes",
+  6: "Sabado",
+  7: "Domingo",
+};
+export const isoWeekdayShortLabels: Record<number, string> = {
+  1: "Lun",
+  2: "Mar",
+  3: "Mie",
+  4: "Jue",
+  5: "Vie",
+  6: "Sab",
+  7: "Dom",
+};
+
 export type Role = (typeof roles)[number];
 export type BlockStatus = (typeof blockStatuses)[number];
 export type ReservationStatus = (typeof reservationStatuses)[number];

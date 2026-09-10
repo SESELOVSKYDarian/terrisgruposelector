@@ -15,12 +15,12 @@ export function ForgotPasswordCard({ loading, onBack, onSubmit, sent }: { loadin
 
   return (
     <AuthLayout onBack={onBack}>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Recuperar contrasena</h1>
-      <p className="mt-2 text-sm leading-6 text-muted">Ingresa tu usuario o tu mail. Si esta registrado, te llega un link para elegir una contrasena nueva.</p>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Recuperar contraseña</h1>
+      <p className="mt-2 text-sm leading-6 text-muted">Ingresa tu usuario o tu mail. Si esta registrado, te llega un link para elegir una contraseña nueva.</p>
 
       {sent ? (
         <p className="mt-6 rounded-lg border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 text-sm text-emerald-300">
-          Si el usuario existe, te llega un mail con un link para restablecer la contrasena.
+          Si el usuario existe, te llega un mail con un link para restablecer la contraseña.
         </p>
       ) : (
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>

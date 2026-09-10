@@ -37,7 +37,7 @@ export function LoginCard({
     <AuthLayout onBack={onBack}>
       <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary-hover/90">PR Territorios</p>
       <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Bienvenido de nuevo</h1>
-      <p className="mt-2 text-sm leading-6 text-muted">Usa tu usuario y contrasena para ingresar.</p>
+      <p className="mt-2 text-sm leading-6 text-muted">Usa tu usuario y contraseña para ingresar.</p>
 
       {hasPasskeyHint ? (
         <button className={`mt-5 w-full ${secondaryButtonClass}`} onClick={onPasskeyLogin} type="button">
@@ -55,11 +55,11 @@ export function LoginCard({
           </div>
         </label>
         <label className="block text-sm font-medium text-foreground/90">
-          Contrasena
+          Contraseña
           <div className="relative mt-1">
             <Lock aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" size={16} />
             <input autoComplete="current-password" className="min-h-11 w-full rounded-xl border border-border bg-background pl-10 pr-11 py-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-4 focus:ring-primary/10" name="password" required type={showPassword ? "text" : "password"} />
-            <button aria-label={showPassword ? "Ocultar contrasena" : "Mostrar contrasena"} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted transition hover:text-foreground" onClick={() => setShowPassword((current) => !current)} type="button">
+            <button aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted transition hover:text-foreground" onClick={() => setShowPassword((current) => !current)} type="button">
               {showPassword ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}
             </button>
           </div>
@@ -82,7 +82,7 @@ export function LoginCard({
       </form>
 
       <button className="mt-5 block w-full text-center text-sm text-primary-hover transition hover:underline" onClick={onForgotPassword} type="button">
-        ¿Olvidaste tu contrasena?
+        ¿Olvidaste tu contraseña?
       </button>
       <p className="mt-3 text-center text-sm text-muted">
         ¿No tenes cuenta?{" "}

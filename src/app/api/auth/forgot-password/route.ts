@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       const token = createResetToken(profile.id);
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
       const link = `${appUrl}/reset-password?token=${token}`;
-      await sendMail(profile.email, "Restablecer tu contrasena", resetPasswordEmailHtml(link));
+      await sendMail(profile.email, "Restablecer tu contraseña", resetPasswordEmailHtml(link));
     }
   }
 
