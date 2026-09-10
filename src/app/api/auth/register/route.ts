@@ -1,22 +1,20 @@
 import { createAdminSupabaseClient, hashPassword } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
-import { isEmailValid, isPasswordValid } from "@/lib/domain";
+import { deriveFullNameFromUsername, isEmailValid, isPasswordValid } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const { username, full_name, email, password } = (await request.json()) as {
+  const { username, email, password } = (await request.json()) as {
     username?: string;
-    full_name?: string;
     email?: string;
     password?: string;
   };
 
   const cleanUsername = username?.trim() ?? "";
-  const cleanFullName = full_name?.trim() ?? "";
   const cleanEmail = email?.trim().toLowerCase() ?? "";
 
-  if (!cleanUsername || !cleanFullName || !cleanEmail || !password) {
+  if (!cleanUsername || !cleanEmail || !password) {
     return fail("Completa todos los campos.", 422);
   }
   if (!isEmailValid(cleanEmail)) {
@@ -38,7 +36,7 @@ export async function POST(request: Request) {
     .from("profiles")
     .insert({
       username: cleanUsername,
-      full_name: cleanFullName,
+      full_name: deriveFullNameFromUsername(cleanUsername),
       email: cleanEmail,
       role: "PUBLICADOR",
       approval_status: "pending",

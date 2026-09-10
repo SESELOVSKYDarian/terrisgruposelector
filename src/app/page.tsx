@@ -35,6 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
+import { AnimatePresence, motion } from "framer-motion";
 import { AuthChoiceScreen } from "./_components/auth/auth-choice-screen";
 import { ForcePasswordChangeScreen } from "./_components/auth/force-password-change-screen";
 import { ForgotPasswordCard } from "./_components/auth/forgot-password-card";
@@ -302,15 +303,6 @@ function localDateTimeValue(value?: string) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function territorySelectionLabel(territory: Territory, progress?: TerritoryProgress) {
-  const base = `Territorio #${territory.number}`;
-  if (!progress || progress.completed_blocks === 0) return base;
-  if (progress.total_blocks > 0 && progress.completed_blocks === progress.total_blocks) {
-    return `${base} - Completado`;
-  }
-  return `${base} - Faltan ${progress.pending_labels.join(", ")}`;
-}
-
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [data, setData] = useState<AppData>(emptyData);
@@ -329,10 +321,16 @@ export default function Home() {
   const [forgotSent, setForgotSent] = useState(false);
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
   const [hasPasskeyHint, setHasPasskeyHint] = useState(false);
+  const [authDirection, setAuthDirection] = useState(0);
 
   useEffect(() => {
     setHasPasskeyHint(document.cookie.includes("terris_has_passkey=1"));
   }, []);
+
+  function navigateAuth(view: typeof authView) {
+    setAuthDirection(view === "register" ? -1 : view === "login" ? 1 : 0);
+    setAuthView(view);
+  }
 
   const isAdmin = Boolean(profile?.roles.includes("ADMIN"));
   const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
@@ -428,13 +426,13 @@ export default function Home() {
     }
   }
 
-  async function handleRegisterSubmit(username: string, fullName: string, email: string, password: string) {
+  async function handleRegisterSubmit(username: string, email: string, password: string) {
     setSaving(true);
     setAuthError("");
     try {
       await requestJson("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify({ username, full_name: fullName, email, password }),
+        body: JSON.stringify({ username, email, password }),
       });
       setAuthView("pending");
     } catch (error) {
@@ -537,28 +535,43 @@ export default function Home() {
     return (
       <>
         <Toast toast={toast} onClose={() => setToast(null)} />
+        <AnimatePresence custom={authDirection} mode="wait">
+        <motion.div
+          animate="center"
+          className="h-dvh"
+          custom={authDirection}
+          exit="exit"
+          initial="enter"
+          key={authView}
+          transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+          variants={{
+            enter: (dir: number) => ({ opacity: 0, x: dir * 56 }),
+            center: { opacity: 1, x: 0 },
+            exit: (dir: number) => ({ opacity: 0, x: dir * -56 }),
+          }}
+        >
         {authView === "register" ? (
           <RegisterCard
             error={authError}
             loading={saving}
             onBack={() => {
-              setAuthView("choice");
+              navigateAuth("choice");
               setAuthError("");
             }}
             onLogin={() => {
-              setAuthView("login");
+              navigateAuth("login");
               setAuthError("");
             }}
             onSubmit={handleRegisterSubmit}
           />
         ) : authView === "pending" ? (
-          <PendingApprovalScreen onBack={() => setAuthView("choice")} />
+          <PendingApprovalScreen onBack={() => navigateAuth("choice")} />
         ) : authView === "otp" ? (
           <OtpCard
             error={authError}
             loading={saving}
             onBack={() => {
-              setAuthView("login");
+              navigateAuth("login");
               setAuthError("");
             }}
             onResend={handleResendOtp}
@@ -569,7 +582,7 @@ export default function Home() {
           <ForgotPasswordCard
             loading={saving}
             onBack={() => {
-              setAuthView("login");
+              navigateAuth("login");
               setForgotSent(false);
             }}
             onSubmit={handleForgotPassword}
@@ -581,23 +594,25 @@ export default function Home() {
             hasPasskeyHint={hasPasskeyHint}
             loading={saving || loading}
             onBack={() => {
-              setAuthView("choice");
+              navigateAuth("choice");
               setAuthError("");
             }}
             onForgotPassword={() => {
-              setAuthView("forgot");
+              navigateAuth("forgot");
               setAuthError("");
             }}
             onPasskeyLogin={handlePasskeyLogin}
             onRegister={() => {
-              setAuthView("register");
+              navigateAuth("register");
               setAuthError("");
             }}
             onSubmit={handleLoginSubmit}
           />
         ) : (
-          <AuthChoiceScreen onLogin={() => setAuthView("login")} onRegister={() => setAuthView("register")} />
+          <AuthChoiceScreen onLogin={() => navigateAuth("login")} onRegister={() => navigateAuth("register")} />
         )}
+        </motion.div>
+        </AnimatePresence>
         {showPasskeyPrompt ? <PasskeyPromptModal onClose={() => setShowPasskeyPrompt(false)} /> : null}
       </>
     );
@@ -1718,59 +1733,153 @@ function AdminDashboard({ data }: { data: AppData }) {
   );
 }
 
-function TerritoryChoiceList({
+type TerritoryPickerDescribe = (territory: Territory) => { subtitle: string; disabled?: boolean };
+
+function TerritoryGrid({
   territories,
-  progressById,
-  blockedIds,
-  name,
-  type,
-  defaultValue,
-  allowValue,
+  describe,
+  selected,
+  onToggle,
 }: {
   territories: Territory[];
-  progressById: Map<string, TerritoryProgress>;
-  blockedIds: Set<string>;
-  name: string;
-  type: "checkbox" | "radio";
-  defaultValue?: string;
-  allowValue?: string;
+  describe: TerritoryPickerDescribe;
+  selected: Set<string>;
+  onToggle: (territory: Territory) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const filtered = [...territories]
+    .filter((territory) => !query.trim() || String(territory.number).includes(query.trim()))
+    .sort((a, b) => a.number - b.number);
+
   return (
-    <div className="grid max-h-[22rem] gap-2 overflow-y-auto rounded-[1.35rem] border border-white/8 bg-black/20 p-2">
-      {territories.map((territory) => {
-        const progress = progressById.get(territory.id);
-        const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
-        const blocked = blockedIds.has(territory.id);
-        const disabled = territory.id === allowValue ? false : blocked || completed;
-        return (
-          <label
-            className={cn(
-              "group flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition",
-              disabled
-                ? "cursor-not-allowed border-white/6 bg-white/[0.02] text-slate-500"
-                : "border-white/8 bg-white/[0.03] text-slate-100 hover:border-white/14 hover:bg-white/[0.05]",
-            )}
-            key={territory.id}
-          >
-            <input
-              className="h-4 w-4 accent-white"
-              defaultChecked={defaultValue === territory.id}
+    <div>
+      <div className="relative">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+        <input autoFocus className={`${inputClass} mt-0 pl-9`} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por numero..." value={query} />
+      </div>
+      <div className="mt-3 grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+        {filtered.map((territory) => {
+          const { subtitle, disabled } = describe(territory);
+          const isSelected = selected.has(territory.id);
+          return (
+            <button
+              className={cn(
+                "flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border p-1.5 text-center transition",
+                isSelected
+                  ? "border-primary bg-primary/15 text-foreground ring-2 ring-primary/40"
+                  : disabled
+                    ? "cursor-not-allowed border-border bg-foreground/[0.02] text-muted"
+                    : "cursor-pointer border-border bg-foreground/[0.03] text-foreground/90 hover:border-primary/40 hover:bg-primary/10",
+              )}
               disabled={disabled}
-              name={name}
-              type={type}
-              value={territory.id}
-            />
-            <div className="min-w-0">
-              <p className="font-medium">{territorySelectionLabel(territory, progress)}</p>
-              <p className="mt-1 text-xs text-slate-500">
-                {completed ? "Territorio completado" : blocked ? "Ya reservado o bloqueado" : "Disponible"}
-              </p>
-              <p className="mt-1 text-xs font-medium text-primary-hover/85">Última completada: {progress?.last_completed_at ? displayDate(progress.last_completed_at) : "Sin registro"}</p>
-            </div>
-          </label>
-        );
-      })}
+              key={territory.id}
+              onClick={() => onToggle(territory)}
+              type="button"
+            >
+              <span className="text-sm font-semibold">#{territory.number}</span>
+              <span className="px-0.5 text-[10px] leading-tight">{subtitle}</span>
+            </button>
+          );
+        })}
+        {!filtered.length ? <p className="col-span-full py-6 text-center text-sm text-muted">Sin resultados.</p> : null}
+      </div>
     </div>
+  );
+}
+
+function TerritoryPickerModal({
+  territories,
+  mode,
+  initialSelected,
+  describe,
+  onConfirm,
+  onClose,
+}: {
+  territories: Territory[];
+  mode: "single" | "multi";
+  initialSelected: string[];
+  describe: TerritoryPickerDescribe;
+  onConfirm: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Set<string>>(() => new Set(initialSelected));
+
+  function toggle(territory: Territory) {
+    if (describe(territory).disabled) return;
+    setDraft((current) => {
+      if (mode === "single") return new Set([territory.id]);
+      const next = new Set(current);
+      if (next.has(territory.id)) next.delete(territory.id);
+      else next.add(territory.id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="modal-overlay fixed inset-0 z-[80] grid place-items-center bg-[var(--overlay-strong)] px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-border p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold tracking-tight text-foreground">{mode === "single" ? "Elegir territorio" : "Elegir territorios"}</h3>
+          <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted transition hover:bg-foreground/[0.06] hover:text-foreground" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></button>
+        </div>
+        <div className="mt-3">
+          <TerritoryGrid describe={describe} onToggle={toggle} selected={draft} territories={territories} />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button className={secondaryButtonClass} onClick={onClose} type="button">Cancelar</button>
+          <button className={primarySmallButtonClass} disabled={mode === "single" && draft.size !== 1} onClick={() => onConfirm([...draft])} type="button">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TerritoryPickerField({
+  name,
+  mode,
+  territories,
+  describe,
+  defaultValue,
+  defaultValues,
+  onSelectionChange,
+  placeholder = "Elegir territorio",
+}: {
+  name?: string;
+  mode: "single" | "multi";
+  territories: Territory[];
+  describe: TerritoryPickerDescribe;
+  defaultValue?: string;
+  defaultValues?: string[];
+  onSelectionChange?: (ids: string[]) => void;
+  placeholder?: string;
+}) {
+  const [selected, setSelected] = useState<string[]>(() => (mode === "single" ? (defaultValue ? [defaultValue] : []) : (defaultValues ?? [])));
+  const [open, setOpen] = useState(false);
+  const byId = useMemo(() => new Map(territories.map((territory) => [territory.id, territory])), [territories]);
+  const summary = selected.length ? selected.map((id) => `#${byId.get(id)?.number ?? "?"}`).join(", ") : placeholder;
+
+  return (
+    <>
+      <button className={cn(inputClass, "flex w-full items-center justify-between gap-2 text-left")} onClick={() => setOpen(true)} type="button">
+        <span className={cn("truncate", !selected.length && "text-muted")}>{summary}</span>
+        <MapIcon aria-hidden="true" className="shrink-0 text-muted" size={16} />
+      </button>
+      {name ? selected.map((id) => <input key={id} name={name} type="hidden" value={id} />) : null}
+      {open ? (
+        <TerritoryPickerModal
+          describe={describe}
+          initialSelected={selected}
+          mode={mode}
+          onClose={() => setOpen(false)}
+          onConfirm={(ids) => {
+            setSelected(ids);
+            setOpen(false);
+            onSelectionChange?.(ids);
+          }}
+          territories={territories}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -1836,27 +1945,35 @@ function renderModal({
       <FormModal title={modal.item ? "Editar reserva" : "Agregar territorios"} subtitle={`${modal.window.name} - ${displayDate(modal.date)}`} onSubmit={(event) => submitFromForm(event, modal.item ? "updateReservation" : "createReservation", (form) => ({ id: modal.item?.id, reservation_window_id: modal.window.id, service_date: modal.date, territory_id: form.get("territory_id"), territory_ids: form.getAll("territory_ids"), departure_location: form.get("departure_location") }))} saving={saving}>
         {modal.item ? (
           <Field label="Territorio">
-            <TerritoryChoiceList
-              blockedIds={new Set([...unavailable].filter((id) => id !== modal.item?.territory_id))}
+            <TerritoryPickerField
+              describe={(territory) => {
+                const progress = progressById.get(territory.id);
+                const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
+                const blocked = unavailable.has(territory.id) && territory.id !== modal.item?.territory_id;
+                return { subtitle: completed ? "Completo" : blocked ? "Ocupado" : "Disponible", disabled: territory.id === modal.item?.territory_id ? false : blocked || completed };
+              }}
               defaultValue={modal.item.territory_id}
+              mode="single"
               name="territory_id"
-              progressById={progressById}
               territories={data.territories}
-              type="radio"
-              allowValue={modal.item.territory_id}
             />
           </Field>
         ) : (
           <fieldset>
-            <legend className="text-sm font-medium text-slate-200">Territorios disponibles</legend>
+            <legend className="text-sm font-medium text-foreground/90">Territorios disponibles</legend>
             <p className="mt-2 text-sm text-muted">Selecciona uno o varios territorios para esta fecha. Los ya ocupados o completados quedan bloqueados automáticamente.</p>
             <div className="mt-3">
-              <TerritoryChoiceList
-                blockedIds={unavailable}
+              <TerritoryPickerField
+                describe={(territory) => {
+                  const progress = progressById.get(territory.id);
+                  const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
+                  const blocked = unavailable.has(territory.id);
+                  return { subtitle: completed ? "Completo" : blocked ? "Ocupado" : "Disponible", disabled: blocked || completed };
+                }}
+                mode="multi"
                 name="territory_ids"
-                progressById={progressById}
+                placeholder="Elegir territorios"
                 territories={data.territories}
-                type="checkbox"
               />
             </div>
           </fieldset>
@@ -1941,12 +2058,17 @@ function renderModal({
           </p>
         </div>
         <Field label="Territorios a bloquear">
-          <TerritoryChoiceList
-            blockedIds={blockedInWindow}
+          <TerritoryPickerField
+            describe={(territory) => {
+              const progress = progressById.get(territory.id);
+              const completed = Boolean(progress?.total_blocks && progress.completed_blocks === progress.total_blocks);
+              const blocked = blockedInWindow.has(territory.id);
+              return { subtitle: completed ? "Completo" : blocked ? "Ya bloqueado" : "Disponible", disabled: blocked || completed };
+            }}
+            mode="multi"
             name="territory_ids"
-            progressById={progressById}
+            placeholder="Elegir territorios"
             territories={data.territories}
-            type="checkbox"
           />
         </Field>
       </FormModal>
@@ -2048,18 +2170,17 @@ function ConductorVisitForm({
         ) : null}
 
         <Field label="Territorio">
-          <select className={inputClass} onChange={(event) => setTerritoryId(event.target.value)} value={territoryId} required>
-            {sortedTerritories.map((territory) => {
+          <TerritoryPickerField
+            describe={(territory) => {
               const round = openRoundByTerritory.get(territory.id);
               const mine = round?.conductor_id === effectiveConductorId;
-              const pendingText = round?.pending_block_labels.length ? ` - Faltan ${formatPendingBlocks(round.pending_block_labels)}` : "";
-              return (
-                <option key={territory.id} value={territory.id}>
-                  Territorio #{territory.number}{pendingText}{mine ? " (asignado)" : ""}
-                </option>
-              );
-            })}
-          </select>
+              return { subtitle: round?.pending_block_labels.length ? formatPendingBlocks(round.pending_block_labels) : mine ? "Asignado" : "Sin pendientes" };
+            }}
+            defaultValue={territoryId}
+            mode="single"
+            onSelectionChange={(ids) => setTerritoryId(ids[0] ?? "")}
+            territories={sortedTerritories}
+          />
         </Field>
 
         <Field label="Fecha"><input className={inputClass} onChange={(event) => setVisitDate(event.target.value)} type="date" value={visitDate} required /></Field>
@@ -2623,42 +2744,26 @@ function SlotTerritoryModal({
   }
 
   return (
-    <div className="modal-overlay fixed inset-0 z-[75] grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-white/10 p-5 sm:p-6">
+    <div className="modal-overlay fixed inset-0 z-[75] grid place-items-center bg-[var(--overlay-strong)] px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-border p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight text-white">Territorios de la fila</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-400">El texto se arma solo con las manzanas que faltan de la vuelta abierta de cada territorio.</p>
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">Territorios de la fila</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">El texto se arma solo con las manzanas que faltan de la vuelta abierta de cada territorio.</p>
           </div>
-          <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} /></button>
+          <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-foreground/[0.06] hover:text-foreground" onClick={onClose} type="button"><X size={16} /></button>
         </div>
 
-        <div className="mt-4 grid max-h-[22rem] gap-2 overflow-y-auto rounded-[1.35rem] border border-white/8 bg-black/20 p-2">
-          {[...data.territories].sort((a, b) => a.number - b.number).map((territory) => {
-            const round = openRoundByTerritory.get(territory.id);
-            const selected = selectedIds.has(territory.id);
-            return (
-              <label
-                className={cn(
-                  "flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition",
-                  selected ? "border-primary/35 bg-primary/10 text-white" : "border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/14 hover:bg-white/[0.05]",
-                )}
-                key={territory.id}
-              >
-                <input checked={selected} className="h-4 w-4 accent-primary" onChange={() => toggle(territory.id)} type="checkbox" />
-                <div className="min-w-0">
-                  <p className="font-medium">Territorio #{territory.number}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {round?.pending_block_labels.length
-                      ? `Faltan ${formatPendingBlocks(round.pending_block_labels)}`
-                      : round
-                        ? "Vuelta abierta, sin manzanas pendientes cargadas"
-                        : "Sin vuelta abierta"}
-                  </p>
-                </div>
-              </label>
-            );
-          })}
+        <div className="mt-4">
+          <TerritoryGrid
+            describe={(territory) => {
+              const round = openRoundByTerritory.get(territory.id);
+              return { subtitle: round?.pending_block_labels.length ? formatPendingBlocks(round.pending_block_labels) : round ? "Sin pendientes" : "Sin vuelta abierta" };
+            }}
+            onToggle={(territory) => toggle(territory.id)}
+            selected={selectedIds}
+            territories={data.territories}
+          />
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -3065,19 +3170,29 @@ function ConfirmationModal({
 }
 function TemporaryPasswordModal({ password, onClose }: { password: string; onClose: () => void }) {
   const [closing, setClosing] = useState(false);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (password) {
       setClosing(false);
+      setCopied(false);
       void navigator.clipboard?.writeText(password);
     }
   }, [password]);
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
   const close = () => {
     if (closing) return;
     setClosing(true);
     window.setTimeout(onClose, 180);
   };
+  function copy() {
+    void navigator.clipboard?.writeText(password).then(() => setCopied(true));
+  }
   if (!password) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-border p-5"><h2 className="text-xl font-semibold text-foreground">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-muted">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={() => void navigator.clipboard?.writeText(password)}><Copy size={16} />Copiar</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-md", closing && "is-closing")}><div className="modal-panel glass-panel w-full max-w-md rounded-[1.5rem] border-emerald-400/20"><div className="border-b border-border p-5"><h2 className="text-xl font-semibold text-foreground">Contrasena temporal</h2><p className="mt-2 text-sm leading-6 text-muted">Ya fue copiada al portapapeles.</p></div><div className="space-y-4 p-5"><div className="break-all rounded-2xl border border-emerald-400/25 bg-emerald-500/12 px-4 py-3 font-mono text-sm font-semibold text-emerald-100">{password}</div><div className="grid gap-2 sm:grid-cols-2"><button className={secondaryButtonClass} type="button" onClick={copy}>{copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}{copied ? "Copiado" : "Copiar"}</button><button className={primarySmallButtonClass} type="button" onClick={close}>Listo</button></div></div></div></div>;
 }
 function AddButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return <button className={primarySmallButtonClass} onClick={onClick} type="button"><Plus size={16} />{children}</button>;

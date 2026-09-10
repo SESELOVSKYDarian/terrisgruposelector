@@ -128,6 +128,16 @@ export function isEmailValid(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+export function deriveFullNameFromUsername(username: string) {
+  const trimmed = username.trim();
+  if (!trimmed) return "";
+  const initial = trimmed.charAt(0).toUpperCase();
+  const rest = trimmed.slice(1);
+  if (!rest) return `${initial}.`;
+  const surname = rest.charAt(0).toUpperCase() + rest.slice(1).toLowerCase();
+  return `${surname} ${initial}.`;
+}
+
 export function formatPendingBlocks(labels: string[]) {
   const numbered: { prefix: string; num: number; label: string }[] = [];
   const other: string[] = [];
