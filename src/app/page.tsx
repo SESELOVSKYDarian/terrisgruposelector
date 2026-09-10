@@ -295,6 +295,10 @@ function displayDate(date: string) {
   return `${day}/${month}/${year}`;
 }
 
+function departurePointLugar(point: { address: string; name: string }) {
+  return point.name.trim() ? `${point.address} - ${point.name}` : point.address;
+}
+
 function displayDateTime(value: string) {
   const date = new Date(value);
   return `${displayDate(date.toISOString())} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -1421,7 +1425,7 @@ function DeparturePointsPanel({
           const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
           return (
             <tr key={point.id}>
-              <Cell><strong>{point.name}</strong></Cell>
+              <Cell>{point.name ? <strong>{point.name}</strong> : <span className="text-slate-500">Sin nombre</span>}</Cell>
               <Cell>{point.address}</Cell>
               <Cell>
                 {point.available_days.length ? (
@@ -2708,8 +2712,8 @@ function WeeklyOutingSlotCard({
         <input className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-slate-600" onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
       </label>
       {!lugar && suggestedPoint ? (
-        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setLugar(suggestedPoint.address)} type="button">
-          <Wand2 size={12} aria-hidden="true" />Usar {suggestedPoint.name}
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setLugar(departurePointLugar(suggestedPoint))} type="button">
+          <Wand2 size={12} aria-hidden="true" />Usar {suggestedPoint.name || suggestedPoint.address}
         </button>
       ) : null}
 
@@ -2867,7 +2871,7 @@ function DeparturePointModal({
       <h2 className="text-xl font-semibold tracking-tight text-white">{item ? "Editar punto de salida" : "Nuevo punto de salida"}</h2>
 
       <div className="space-y-4">
-        <Field label="Nombre"><input className={inputClass} onChange={(event) => setName(event.target.value)} placeholder="Ej. Casa de Fulano" required value={name} /></Field>
+        <Field label="Nombre (opcional, solo para casas)"><input className={inputClass} onChange={(event) => setName(event.target.value)} placeholder="Ej. Casa de Fulano" value={name} /></Field>
         <Field label="Direccion / lugar"><input className={inputClass} onChange={(event) => setAddress(event.target.value)} placeholder="Ej. Calle 123, esquina..." required value={address} /></Field>
 
         <div>

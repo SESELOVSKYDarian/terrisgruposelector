@@ -751,7 +751,7 @@ export async function POST(request: Request) {
         available_days: availableDays,
         updated_at: new Date().toISOString(),
       };
-      if (!row.name || !row.address) return fail("Completa el nombre y la direccion.", 422);
+      if (!row.address) return fail("Completa la direccion.", 422);
       const territoryIds = Array.isArray(payload?.territory_ids) ? payload.territory_ids.map((id) => String(id)) : [];
 
       let pointId = String(payload?.id ?? "");
@@ -1029,7 +1029,7 @@ export async function POST(request: Request) {
         supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
         supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
         supabase.from("weekly_outing_slots").select("id,slot_date,lugar").eq("weekly_outing_id", weeklyOutingId),
-        supabase.from("departure_points").select("address,available_days,departure_point_territories(territory_id,sort_order)"),
+        supabase.from("departure_points").select("name,address,available_days,departure_point_territories(territory_id,sort_order)"),
       ]);
       const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error, departurePointsResult.error].find(Boolean);
       if (firstError) return fail(firstError.message);
@@ -1087,10 +1087,12 @@ export async function POST(request: Request) {
       const usedTerritoryIds = new Set((existingSlotTerritories ?? []).map((entry) => entry.territory_id));
 
       const territoryToPointAddress = new Map<string, string>();
+      const territoryToLugar = new Map<string, string>();
       for (const point of departurePointsResult.data ?? []) {
         for (const entry of point.departure_point_territories ?? []) {
           if (!territoryToPointAddress.has(entry.territory_id) && activeTerritoryIds.has(entry.territory_id)) {
             territoryToPointAddress.set(entry.territory_id, point.address);
+            territoryToLugar.set(entry.territory_id, point.name?.trim() ? `${point.address} - ${point.name}` : point.address);
           }
         }
       }
@@ -1155,8 +1157,9 @@ export async function POST(request: Request) {
         if (!territoryId) break;
         usedTerritoryIds.add(territoryId);
 
-        const resolvedLugar = slot.lugar || territoryToPointAddress.get(territoryId) || null;
-        if (resolvedLugar) lastAddressByDay.set(slot.slot_date, resolvedLugar);
+        const resolvedAddress = slot.lugar || territoryToPointAddress.get(territoryId) || null;
+        const resolvedLugar = slot.lugar || territoryToLugar.get(territoryId) || null;
+        if (resolvedAddress) lastAddressByDay.set(slot.slot_date, resolvedAddress);
 
         if (!slot.lugar && resolvedLugar) {
           const { error: slotUpdateError } = await supabase.from("weekly_outing_slots").update({ lugar: resolvedLugar }).eq("id", slot.id);
