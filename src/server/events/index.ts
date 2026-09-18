@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { processInternalNotification, type InternalEvent, type InternalEventRepository, type InternalNotification } from "./processor";
+import { processPushNotification, type PushEventRepository } from "@/server/push";
 
 export const domainEventTypes = [
   "OUTING_ASSIGNED",
@@ -42,7 +43,7 @@ export type DomainEventPayloads = {
   GROUP_WINDOW_OPENED: { recipientId: string; windowId: string; title: string };
   GROUP_WINDOW_REMINDER: { recipientId: string; windowId: string; title: string };
   GROUP_RESERVATION_COMPLETED: { recipientId: string; reservationId: string; title: string };
-  VISIT_REPORT_DUE: { recipientId: string; territoryRoundId: string; title: string };
+  VISIT_REPORT_DUE: { recipientId: string; territoryRoundId: string; title: string; targetUrl?: string };
   VISIT_REPORT_SUBMITTED: { recipientId: string; reportId: string; title: string };
   BUILDING_PROPOSED: { recipientId: string; proposalId: string; title: string };
   BUILDING_CENSUS_CORRECTION: { recipientId: string; correctionId: string; title: string };
@@ -63,12 +64,18 @@ export type EventRepository = {
   insertEvent: (input: DomainEventInput<DomainEventType>) => Promise<{ event: StoredEvent; created: boolean }>;
   createInternalNotification: (notification: InternalNotification) => Promise<boolean>;
   recordDelivery: (eventId: string, recipientId: string) => Promise<void>;
+  listPushSubscriptions: (recipientId: string) => Promise<Array<{ id: string; endpoint: string; p256dh: string; auth: string }>>;
+  removePushSubscription: (subscriptionId: string) => Promise<void>;
+  recordPushDelivery: (eventId: string, recipientId: string, metadata: Record<string, unknown>) => Promise<void>;
 };
 
-/** Processes only this phase's internal-inbox channel. Push, scheduled actions
- * and audit are deliberate future consumers of the same persisted event. */
 export async function processDomainEvent(repository: EventRepository, event: StoredEvent) {
-  return processInternalNotification(repository as InternalEventRepository, event as InternalEvent);
+  const internal = await processInternalNotification(repository as InternalEventRepository, event as InternalEvent);
+  // Push is intentionally a best-effort secondary channel. Inbox delivery above
+  // remains authoritative even when credentials, devices, or browsers fail.
+  try { await processPushNotification(repository as PushEventRepository, event); }
+  catch (error) { console.warn("El canal push falló; el inbox interno permanece entregado.", error); }
+  return internal;
 }
 
 function supabaseRepository(): EventRepository {
@@ -90,6 +97,19 @@ function supabaseRepository(): EventRepository {
     },
     async recordDelivery(eventId, recipientId) {
       const { error } = await supabase.from("event_deliveries").upsert({ event_id: eventId, recipient_id: recipientId, channel: "IN_APP" }, { onConflict: "event_id,recipient_id,channel", ignoreDuplicates: true });
+      if (error) throw new Error(error.message);
+    },
+    async listPushSubscriptions(recipientId) {
+      const { data, error } = await supabase.from("push_subscriptions").select("id,endpoint,p256dh,auth").eq("profile_id", recipientId).eq("enabled", true);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    },
+    async removePushSubscription(subscriptionId) {
+      const { error } = await supabase.from("push_subscriptions").update({ enabled: false, disabled_at: new Date().toISOString() }).eq("id", subscriptionId);
+      if (error) throw new Error(error.message);
+    },
+    async recordPushDelivery(eventId, recipientId, metadata) {
+      const { error } = await supabase.from("event_deliveries").upsert({ event_id: eventId, recipient_id: recipientId, channel: "PUSH", metadata }, { onConflict: "event_id,recipient_id,channel", ignoreDuplicates: true });
       if (error) throw new Error(error.message);
     },
   };

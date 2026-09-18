@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CommandPalette } from "@/components/command-palette/command-palette";
 import { NotificationCenter } from "@/components/notifications/notification-center";
+import { PushPermissionPrompt } from "@/components/push/push-permission-prompt";
 
 export type ShellAccess = {
   canManageUsers: boolean;
@@ -112,6 +113,7 @@ export function AppShell({
     <AnimatePresence>{mobileOpen ? <><motion.button aria-label="Cerrar menú" className="fixed inset-0 z-40 bg-black/45 lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} onClick={() => setMobileOpen(false)} type="button" /><div className="fixed inset-y-0 left-0 z-50 lg:hidden">{sidebar(true)}</div></> : null}</AnimatePresence>
     <div className="min-w-0 flex-1 pb-18 lg:pb-0">
       <div className="flex h-14 items-center border-b border-border bg-background-soft px-3 lg:hidden"><button className="shell-icon-button" onClick={() => setMobileOpen(true)} type="button" aria-label="Abrir menú"><Menu size={20} /></button><span className="ml-3 text-sm font-semibold">PR Territorios</span></div>
+      <PushPermissionPrompt userId={user.username} />
       {children}
     </div>
     <nav className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-center justify-around border-t border-border bg-background-soft px-2 lg:hidden" aria-label="Navegación rápida">
