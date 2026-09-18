@@ -398,6 +398,15 @@ export default function Home() {
     if (pathByView[view]) window.history.pushState(null, "", pathByView[view]);
   }
 
+  async function createOutingFromPalette() {
+    const today = new Date();
+    const daysUntilThursday = (4 - today.getDay() + 7) % 7 || 7;
+    const startsOn = new Date(today);
+    startsOn.setDate(today.getDate() + daysUntilThursday);
+    await mutate("createWeeklyOuting", { starts_on: startsOn.toISOString().slice(0, 10) });
+    changeView("outings");
+  }
+
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3600);
@@ -668,7 +677,7 @@ export default function Home() {
     <main className="relative z-10 min-h-screen text-foreground">
       <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
-      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onLogout={logout} user={profile}>
+      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onCreateOuting={isAdmin ? () => void createOutingFromPalette() : undefined} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
           <PersonalSettingsView activeView={activeView} />

@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CommandPalette } from "@/components/command-palette/command-palette";
 
 export type ShellAccess = {
   canManageUsers: boolean;
@@ -53,6 +54,7 @@ export function AppShell({
   activeView,
   children,
   onChange,
+  onCreateOuting,
   onLogout,
   user,
 }: {
@@ -60,11 +62,13 @@ export function AppShell({
   activeView: string;
   children: React.ReactNode;
   onChange: (view: string) => void;
+  onCreateOuting?: () => void;
   onLogout: () => void;
   user: ShellUser;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const reduceMotion = useReducedMotion();
   const sections = sectionItems(access).map((section) => ({ ...section, items: section.items.filter((item) => item.visible !== false) })).filter((section) => section.items.length);
   const transition = reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" as const };
@@ -80,7 +84,7 @@ export function AppShell({
       <div className="flex h-16 items-center gap-2 border-b border-border px-3">
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5"><img alt="PR" className="h-full w-full object-contain" src="/PR.svg" /></span>
         {!collapsed || mobile ? <span className="min-w-0 flex-1 truncate text-sm font-semibold">PR Territorios</span> : null}
-        <button className="shell-icon-button" type="button" aria-label="Buscar (próximamente)"><Search size={18} /></button>
+        <button className="shell-icon-button" onClick={() => setCommandPaletteOpen(true)} type="button" aria-label="Abrir paleta de comandos"><Search size={18} /></button>
         <button className="shell-icon-button" type="button" aria-label="Notificaciones (próximamente)"><Bell size={18} /></button>
         {mobile ? <button className="shell-icon-button" onClick={() => setMobileOpen(false)} type="button" aria-label="Cerrar menú"><X size={18} /></button> : <button className="shell-icon-button hidden lg:inline-flex" onClick={() => setCollapsed((value) => !value)} type="button" aria-label={collapsed ? "Expandir barra lateral" : "Contraer barra lateral"}><ChevronsLeft className={cn(collapsed && "rotate-180")} size={18} /></button>}
       </div>
@@ -104,6 +108,7 @@ export function AppShell({
     <nav className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-center justify-around border-t border-border bg-background-soft px-2 lg:hidden" aria-label="Navegación rápida">
       {sections.flatMap((section) => section.items).slice(0, 4).map((item) => <NavButton compact item={item} key={item.id} active={activeView === item.id} onClick={() => onChange(item.id)} />)}
     </nav>
+    <CommandPalette access={access} onCreateOuting={onCreateOuting} onNavigate={onChange} open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} userId={user.username} />
   </div>;
 }
 
