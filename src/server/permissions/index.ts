@@ -15,6 +15,7 @@ import {
 
 export const permissionNames = [
   "MANAGE_USERS",
+  "MANAGE_SYSTEM",
   "PLAN_OUTINGS",
   "PUBLISH_OUTINGS",
   "MANAGE_TERRITORIES",
@@ -32,12 +33,38 @@ export type FreshPermissionContext = PermissionProfile & {
 function permissionsForResponsibilities(responsibilities: readonly ResponsibilityKind[]) {
   const permissions = new Set<PermissionName>();
   if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_USERS");
+  if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_SYSTEM");
   if (responsibilities.includes("SIERVO_TERRITORIOS")) {
     permissions.add("PLAN_OUTINGS");
     permissions.add("MANAGE_TERRITORIES");
   }
   if (responsibilities.includes("SUPERINTENDENTE_SERVICIO")) permissions.add("PUBLISH_OUTINGS");
   return permissions;
+}
+
+/** A small, serializable projection for navigation. Keep UI visibility based on
+ * this server-derived access object rather than on legacy role strings. */
+export function navigationAccess(context: FreshPermissionContext) {
+  const operationalResponsibilities = new Set<ResponsibilityKind>([
+    "COORDINADOR",
+    "SUPERINTENDENTE_SERVICIO",
+    "SIERVO_TERRITORIOS",
+    "SUPERINTENDENTE_GRUPO",
+    "AUXILIAR_GRUPO",
+  ]);
+
+  return {
+    canManageUsers: hasPermission(context, "MANAGE_USERS"),
+    canManageSystem: hasPermission(context, "MANAGE_SYSTEM"),
+    canManageTerritories: hasPermission(context, "MANAGE_TERRITORIES"),
+    canPlanOutings: hasPermission(context, "PLAN_OUTINGS") || hasPermission(context, "PUBLISH_OUTINGS"),
+    canUseReservations:
+      context.appointment === "ANCIANO" || context.groupResponsibilities.length > 0,
+    hasOperationalResponsibility: [
+      ...context.globalResponsibilities,
+      ...context.groupResponsibilities.map((assignment) => assignment.responsibility),
+    ].some((responsibility) => operationalResponsibilities.has(responsibility)),
+  };
 }
 
 export function hasPermission(context: FreshPermissionContext, permission: PermissionName) {

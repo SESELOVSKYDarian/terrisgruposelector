@@ -36,6 +36,8 @@ import {
 } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { AnimatePresence, motion } from "framer-motion";
+import { usePathname } from "next/navigation";
+import { AppShell, type ShellAccess } from "@/components/shell/app-shell";
 import { AuthChoiceScreen } from "./_components/auth/auth-choice-screen";
 import { ForcePasswordChangeScreen } from "./_components/auth/force-password-change-screen";
 import { ForgotPasswordCard } from "./_components/auth/forgot-password-card";
@@ -312,6 +314,7 @@ function localDateTimeValue(value?: string) {
 }
 
 export default function Home() {
+  const pathname = usePathname();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [data, setData] = useState<AppData>(emptyData);
   const [activeView, setActiveView] = useState("dashboard");
@@ -330,6 +333,14 @@ export default function Home() {
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
   const [hasPasskeyHint, setHasPasskeyHint] = useState(false);
   const [authDirection, setAuthDirection] = useState(0);
+  const [shellAccess, setShellAccess] = useState<ShellAccess>({
+    canManageUsers: false,
+    canManageSystem: false,
+    canManageTerritories: false,
+    canPlanOutings: false,
+    canUseReservations: false,
+    hasOperationalResponsibility: false,
+  });
 
   useEffect(() => {
     setHasPasskeyHint(document.cookie.includes("terris_has_passkey=1"));
@@ -351,6 +362,14 @@ export default function Home() {
       const body = (await requestJson("/api/app-data")) as AppData;
       setData(body);
       setProfile(body.profile);
+      try {
+        const navigation = await requestJson("/api/auth/navigation");
+        setShellAccess(navigation.access as ShellAccess);
+      } catch {
+        // The shell stays safely minimal if the permission migration has not
+        // been applied yet; authorization never falls back to client roles.
+        setShellAccess({ canManageUsers: false, canManageSystem: false, canManageTerritories: false, canPlanOutings: false, canUseReservations: false, hasOperationalResponsibility: false });
+      }
       setLoadedAt(Date.now());
     } catch (error) {
       setProfile(null);
@@ -363,6 +382,21 @@ export default function Home() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const viewByPath: Record<string, string> = {
+      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
+    };
+    setActiveView(viewByPath[pathname] ?? new URLSearchParams(window.location.search).get("view") ?? "dashboard");
+  }, [pathname]);
+
+  function changeView(view: string) {
+    const pathByView: Record<string, string> = {
+      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
+    };
+    setActiveView(view);
+    if (pathByView[view]) window.history.pushState(null, "", pathByView[view]);
+  }
 
   useEffect(() => {
     if (!toast) return;
@@ -634,34 +668,20 @@ export default function Home() {
     <main className="relative z-10 min-h-screen text-foreground">
       <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
+      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
-        {isAdmin ? (
-          <div className="grid items-start gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
-            <AdminNav
+        {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
+          <PersonalSettingsView activeView={activeView} />
+        ) : isAdmin ? (
+          <div className="view-transition min-w-0" key={activeView}>
+            <AdminView
               activeView={activeView}
-              onChange={setActiveView}
+              data={data}
+              loadedAt={loadedAt}
+              openRound={openRound}
+              setModal={setModal}
+              mutate={mutate}
             />
-            <div className="min-w-0 space-y-3">
-              <AdminTopbar
-                activeView={activeView}
-                currentUser={profile}
-                data={data}
-                mutate={mutate}
-                onLogout={logout}
-                setActiveView={setActiveView}
-                setModal={setModal}
-              />
-              <div className="view-transition min-w-0" key={activeView}>
-                <AdminView
-                  activeView={activeView}
-                  data={data}
-                  loadedAt={loadedAt}
-                  openRound={openRound}
-                  setModal={setModal}
-                  mutate={mutate}
-                />
-              </div>
-            </div>
           </div>
         ) : isAnciano && isConductor ? (
           <>
@@ -750,6 +770,7 @@ export default function Home() {
           </>
         )}
       </div>
+      </AppShell>
 
       <ModalShell modal={modal} onClose={() => setModal(null)}>
         {modal ? renderModal({
@@ -819,7 +840,7 @@ function AdminNav({
   return (
     <aside className="admin-sidebar glass-panel flex min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]" aria-label="Administracion">
       <div className="flex shrink-0 items-center gap-3 px-2 py-2">
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-border bg-foreground/[0.04] p-1.5">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-foreground/[0.05] p-1.5">
           <img alt="PR Territorios" className="h-full w-full object-contain" src="/PR.svg" />
         </span>
         <div className="min-w-0">
@@ -963,7 +984,7 @@ function TopbarSearch({
     <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
       <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
       <input
-        className="h-10 w-full rounded-xl border border-white/10 bg-black/25 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+        className="h-10 w-full rounded-xl bg-white/[0.06] pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:ring-4 focus:ring-primary/10"
         onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder="Buscar territorio, usuario, ventana..."
@@ -973,7 +994,7 @@ function TopbarSearch({
       {open && query.trim() ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[280px] overflow-hidden rounded-[1.1rem] border border-white/10 bg-[#0c1615] shadow-2xl">
+          <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[280px] overflow-hidden rounded-[1.1rem] bg-[#0c1615] shadow-2xl">
             {results.length ? (
               <div className="max-h-[60vh] divide-y divide-white/8 overflow-y-auto">
                 {results.map((result) => (
@@ -1011,10 +1032,10 @@ function NotificationsBell({
     <div className="relative shrink-0">
       <button
         className={cn(
-          "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
           open
-            ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
-            : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+            ? "bg-sky-500/15 text-sky-200"
+            : "bg-white/[0.05] text-slate-300 hover:bg-white/[0.09] hover:text-white",
         )}
         onClick={() => setOpen((current) => !current)}
         type="button"
@@ -1027,8 +1048,8 @@ function NotificationsBell({
       {open ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1615] shadow-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+          <div className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] bg-[#0c1615] shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
               <p className="text-sm font-semibold text-white">Avisos</p>
               {unread.length ? (
                 <button className="text-xs font-semibold text-primary hover:text-primary-hover" onClick={() => void mutate("markNotificationRead")} type="button">
@@ -1080,8 +1101,8 @@ function AccountMenu({
     <div className="relative shrink-0">
       <button
         className={cn(
-          "inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl border text-xs font-bold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-          open ? "border-primary/40 bg-primary/15" : "border-white/10 bg-white/[0.08] hover:bg-white/[0.12]",
+          "inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl text-xs font-bold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+          open ? "bg-primary/20" : "bg-white/[0.08] hover:bg-white/[0.12]",
         )}
         onClick={() => setOpen((current) => !current)}
         type="button"
@@ -1093,8 +1114,8 @@ function AccountMenu({
       {open ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,260px)] overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#0c1615] shadow-2xl">
-            <div className="border-b border-white/10 px-4 py-3">
+          <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,260px)] overflow-hidden rounded-[1.25rem] bg-[#0c1615] shadow-2xl">
+            <div className="border-b border-white/8 px-4 py-3">
               <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
               <p className="truncate text-xs text-slate-500">@{currentUser.username}</p>
             </div>
@@ -1133,7 +1154,7 @@ function ElderReservations({
         const dates = [window.saturday_date, window.sunday_date].filter(Boolean) as string[];
         return (
           <article className="glass-panel floating-card overflow-hidden rounded-[1.5rem]" key={window.id}>
-            <div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 border-b border-white/8 p-5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-white">{window.name}</h2>
@@ -1260,7 +1281,30 @@ function AdminView({
     return <GroupsPanel data={data} mutate={mutate} setModal={setModal} />;
   }
 
-  return <UsersPanel data={data} mutate={mutate} setModal={setModal} />;
+  if (activeView === "users") {
+    return <UsersPanel data={data} mutate={mutate} setModal={setModal} />;
+  }
+
+  if (activeView === "settings") {
+    return <ShellPlaceholder title="Ajustes del sistema" text="La configuración del sistema se incorporará aquí en una fase posterior. Los ajustes personales están en el menú de tu perfil." />;
+  }
+
+  return <ShellPlaceholder title="Sección en preparación" text="Esta ruta ya usa la navegación V2; la pantalla operativa se migrará sin retirar los flujos existentes." />;
+}
+
+function PersonalSettingsView({ activeView }: { activeView: string }) {
+  const content: Record<string, { title: string; text: string }> = {
+    account: { title: "Mi cuenta", text: "La edición de datos personales se incorporará aquí." },
+    appearance: { title: "Apariencia", text: "El selector de tema actual se conserva mientras esta preferencia se migra a la cuenta." },
+    notifications: { title: "Notificaciones", text: "Las preferencias se conectarán cuando se implemente el centro de notificaciones." },
+    devices: { title: "Dispositivos", text: "La administración de dispositivos y passkeys se incorporará aquí." },
+    shortcuts: { title: "Atajos", text: "Los atajos se documentarán junto con la paleta de comandos de la Fase 3." },
+  };
+  return <ShellPlaceholder {...content[activeView]} />;
+}
+
+function ShellPlaceholder({ title, text }: { title: string; text: string }) {
+  return <section className="glass-panel max-w-2xl rounded-xl border border-border p-6"><p className="text-xs font-semibold tracking-[0.14em] text-muted">PR TERRITORIOS</p><h1 className="mt-2 text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-3 text-sm text-muted">{text}</p></section>;
 }
 
 function WindowsPanel({
@@ -1443,7 +1487,7 @@ function DeparturePointsPanel({
                   <div className="flex flex-wrap items-center gap-1">
                     {territories.map((entry, index) => (
                       <span className="inline-flex items-center gap-1" key={entry.territory_id}>
-                        <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200">#{entry.territories?.number ?? "?"}</span>
+                        <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200">#{entry.territories?.number ?? "?"}</span>
                         {index < territories.length - 1 ? <span className="text-slate-600">&rarr;</span> : null}
                       </span>
                     ))}
@@ -1647,7 +1691,7 @@ function ReservationCollection({
           <article className="glass-panel overflow-hidden rounded-[1.5rem]" key={window.id}>
             <div className="flex flex-col gap-3 border-b border-white/8 bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
               <button className="flex flex-1 items-center gap-3 text-left" onClick={() => toggleWindow(window.id)} type="button">
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300">
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-slate-300">
                   {expanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                 </span>
                 <span>
@@ -1668,7 +1712,7 @@ function ReservationCollection({
               {windowReservations.map((reservation) => {
                 const territory = data.territories.find((item) => item.id === reservation.territory_id);
                 return (
-                  <article className={cn("group flex min-h-56 flex-col rounded-[1.25rem] border p-4 transition-colors duration-200", blocked ? "border-amber-400/15 bg-amber-500/[0.055] hover:border-amber-400/25" : "border-white/8 bg-white/[0.025] hover:border-white/14")} key={reservation.id}>
+                  <article className={cn("group flex min-h-56 flex-col rounded-[1.25rem] p-4 transition-colors duration-200", blocked ? "bg-amber-500/[0.06] hover:bg-amber-500/[0.09]" : "bg-white/[0.03] hover:bg-white/[0.05]")} key={reservation.id}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-medium text-slate-500">{serviceDayLabels[reservation.service_day]} · {displayDate(reservation.service_date)}</p>
@@ -1693,7 +1737,7 @@ function ReservationCollection({
                       )}
                     </dl>
 
-                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-white/8 pt-4">
+                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-white/6 pt-4">
                       <select
                         aria-label={`Estado del territorio ${reservation.territories?.number ?? territory?.number}`}
                         className={compactSelectClass + " mr-auto"}
@@ -1854,7 +1898,7 @@ function TerritoryPickerModal({
 
   return (
     <div className="modal-overlay fixed inset-0 z-[80] grid place-items-center bg-[var(--overlay-strong)] px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-border p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold tracking-tight text-foreground">{mode === "single" ? "Elegir territorio" : "Elegir territorios"}</h3>
           <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted transition hover:bg-foreground/[0.06] hover:text-foreground" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></button>
@@ -2085,7 +2129,7 @@ function renderModal({
     const dates = [modal.window.saturday_date, modal.window.sunday_date].filter(Boolean) as string[];
     return (
       <FormModal title="Bloquear territorios" subtitle={`${modal.window.name} · el bloqueo aplicará a toda la ventana`} saving={saving} onSubmit={(event) => submitFromForm(event, "createAdminReservations", (form) => ({ reservation_window_id: modal.window.id, territory_ids: form.getAll("territory_ids") }))}>
-        <div className="rounded-[1.35rem] border border-white/8 bg-white/[0.02] p-4">
+        <div className="rounded-[1.35rem] bg-white/[0.03] p-4">
           <p className="text-sm font-medium text-white">Fechas cubiertas</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {dates.map((date) => <Badge className="border-white/10 bg-black/20 text-slate-300" key={date}>{displayDate(date)}</Badge>)}
@@ -2522,7 +2566,7 @@ function WeekendRosterPanel({
         {adding ? (
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-3.5 py-3">
             <input
-              className="min-h-9 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-sm text-white outline-none"
+              className="min-h-9 rounded-lg bg-black/20 px-2.5 py-1.5 text-sm text-white outline-none"
               onChange={(event) => setNewDate(event.target.value)}
               type="date"
               value={newDate}
@@ -2540,7 +2584,7 @@ function WeekendRosterPanel({
         {controls.paged.map((entry) => {
           const isSaturday = new Date(`${entry.service_date}T00:00:00Z`).getUTCDay() === 6;
           return (
-            <div className="flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.02] px-3.5 py-3" key={entry.id}>
+            <div className="flex items-center gap-2.5 rounded-2xl bg-white/[0.03] px-3.5 py-3" key={entry.id}>
               <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-[10px] font-semibold uppercase", isSaturday ? "border-sky-400/25 bg-sky-500/10 text-sky-200" : "border-amber-400/25 bg-amber-500/10 text-amber-200")}>
                 {isSaturday ? "Sab" : "Dom"}
               </span>
@@ -2591,7 +2635,7 @@ function WeeklyOutingDays({
                 <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
               </div>
               <button
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-primary/30 hover:bg-primary/10 hover:text-primary-hover"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-white/[0.05] text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
                 onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
                 title="Agregar salida"
                 type="button"
@@ -2668,9 +2712,9 @@ function WeeklyOutingSlotCard({
   const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
 
   return (
-    <div className={cn("rounded-2xl border p-3 transition", highlighted ? "border-primary/30 bg-primary/[0.07]" : "border-white/8 bg-black/15")}>
+    <div className={cn("rounded-2xl p-3 transition", highlighted ? "bg-primary/[0.09]" : "bg-black/15")}>
       <div className="flex items-start justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5">
+        <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/25 px-2 py-1.5">
           <Clock className="text-slate-500" size={13} aria-hidden="true" />
           <input className="w-[68px] bg-transparent text-sm text-white outline-none" onChange={(event) => setHora(event.target.value)} type="time" value={hora} />
         </span>
@@ -2707,7 +2751,7 @@ function WeeklyOutingSlotCard({
         </button>
       ) : null}
 
-      <label className="mt-2 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
+      <label className="mt-2 flex items-center gap-2 rounded-lg bg-black/20 px-2.5 py-1.5">
         <MapPin className="shrink-0 text-slate-500" size={13} aria-hidden="true" />
         <input className="w-full min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-slate-600" onChange={(event) => setLugar(event.target.value)} placeholder="Lugar de salida" value={lugar} />
       </label>
@@ -2719,7 +2763,7 @@ function WeeklyOutingSlotCard({
 
       <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-primary/30 hover:bg-primary/5" onClick={() => setTerritoryModalOpen(true)} type="button">
         {territories.length ? territories.map((text, index) => (
-          <span className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>{text}</span>
+          <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>{text}</span>
         )) : (
           <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><MapIcon size={13} aria-hidden="true" />Elegir territorios</span>
         )}
@@ -2782,7 +2826,7 @@ function SlotTerritoryModal({
 
   return (
     <div className="modal-overlay fixed inset-0 z-[75] grid place-items-center bg-[var(--overlay-strong)] px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-border p-5 sm:p-6">
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold tracking-tight text-foreground">Territorios de la fila</h2>
@@ -2905,7 +2949,7 @@ function DeparturePointModal({
             {territoryIds.map((id, index) => {
               const territory = data.territories.find((item2) => item2.id === id);
               return (
-                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5" key={id}>
+                <div className="flex items-center gap-2 rounded-lg bg-black/20 px-2.5 py-1.5" key={id}>
                   <span className="w-5 shrink-0 text-center text-xs font-semibold text-slate-500">{index + 1}</span>
                   <span className="flex-1 truncate text-sm text-white">Territorio #{territory?.number ?? "?"}</span>
                   <button className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30" disabled={index === 0} onClick={() => moveTerritory(index, -1)} title="Mas cerca" type="button">
@@ -2954,7 +2998,7 @@ function TerritoryPickerPopup({
 
   return (
     <div className="modal-overlay fixed inset-0 z-[70] grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] border border-white/10 p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-panel glass-panel w-full max-w-lg rounded-[1.5rem] p-5 sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold tracking-tight text-white">Agregar territorio</h3>
           <button className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white" onClick={onClose} type="button"><X size={16} aria-hidden="true" /></button>
@@ -3298,13 +3342,13 @@ function Metric({
   );
 }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-foreground/[0.04] text-foreground">{icon}</span><h2 className="mt-4 text-lg font-semibold text-foreground">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">{text}</p></section>;
+  return <section className="glass-panel rounded-[1.75rem] px-5 py-12 text-center"><span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-foreground/[0.05] text-foreground">{icon}</span><h2 className="mt-4 text-lg font-semibold text-foreground">{title}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">{text}</p></section>;
 }
 function Panel({ title, description, action, children }: { title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="mt-1 text-sm text-muted">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
+  return <section className="glass-panel rounded-[1.75rem]"><div className="flex flex-col gap-3 border-b border-border/60 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="mt-1 text-sm text-muted">{description}</p></div>{action}</div><div className="space-y-4 p-5">{children}</div></section>;
 }
 function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return <div className="overflow-x-auto rounded-2xl border border-border bg-foreground/[0.02]"><table className="w-full min-w-[760px] border-collapse text-left text-sm text-foreground/90"><thead className="bg-foreground/[0.04] text-xs uppercase tracking-[0.12em] text-muted"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-border">{children}</tbody></table></div>;
+  return <div className="overflow-x-auto rounded-xl"><table className="w-full min-w-[760px] border-collapse text-left text-sm text-foreground/90"><thead className="text-xs uppercase tracking-[0.12em] text-muted"><tr>{headers.map((header) => <th className="px-3 py-3 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-border/60">{children}</tbody></table></div>;
 }
 function Cell({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3 align-middle">{children}</td>;
@@ -3313,13 +3357,13 @@ function Actions({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3"><div className="flex justify-end gap-2">{children}</div></td>;
 }
 function Badge({ children, className }: { children: React.ReactNode; className: string }) {
-  return <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", className)}>{children}</span>;
+  return <span className={cn("inline-flex rounded-md px-2 py-1 text-xs font-semibold", className)}>{children}</span>;
 }
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-border bg-foreground/[0.04] px-3 text-foreground/90 transition hover:border-foreground/18 hover:bg-foreground/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl bg-foreground/[0.05] px-3 text-foreground/90 transition hover:bg-foreground/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={onClick} type="button" aria-label={label} title={label}>{children}</button>;
 }
 function DeleteButton({ onClick, label = "Eliminar" }: { onClick: () => void; label?: string }) {
-  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
+  return <button className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-xl bg-rose-500/10 px-3 text-rose-200 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" onClick={onClick} type="button" aria-label={label} title={label}><Trash2 size={16} aria-hidden="true" /></button>;
 }
 function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: () => void; children: React.ReactNode }) {
   const [closing, setClosing] = useState(false);
@@ -3332,7 +3376,7 @@ function ModalShell({ modal, onClose, children }: { modal: ModalState; onClose: 
     window.setTimeout(onClose, 180);
   };
   if (!modal) return null;
-  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" || modal.type === "territoryVisit" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-border p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors duration-200 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
+  return <div className={cn("modal-overlay fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[var(--overlay-soft)] px-4 py-6 backdrop-blur-sm", closing && "is-closing")} onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className={cn("modal-panel glass-panel w-full rounded-[1.5rem]", modal.type === "territoryBlocks" || modal.type === "territoryVisit" ? "max-w-3xl" : "max-w-lg")} role="dialog" aria-modal="true"><div className="flex justify-end border-b border-border/60 p-3"><button className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors duration-200 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30" onClick={close} type="button" aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div>;
 }
 function FormModal({ title, subtitle, saving, onSubmit, children, hideSubmit = false }: { title: string; subtitle?: string; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; children: React.ReactNode; hideSubmit?: boolean }) {
   return <form className="space-y-5 p-5 sm:p-6" onSubmit={onSubmit}><div><h2 className="text-xl font-semibold tracking-tight text-foreground">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}</div><div className="space-y-4">{children}</div>{!hideSubmit ? <button className={primaryButtonClass} disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar"}</button> : null}</form>;
