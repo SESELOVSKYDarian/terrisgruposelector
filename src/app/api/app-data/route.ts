@@ -8,6 +8,7 @@ import {
   type SessionProfile,
 } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
+import { emitDomainEvent } from "@/server/events";
 import { blockStatuses, reservationStatuses, roles } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -973,14 +974,33 @@ export async function POST(request: Request) {
     }
 
     if (action === "updateWeeklyOutingSlot") {
+      const slotId = String(payload?.id ?? "");
+      const { data: existingSlot, error: existingSlotError } = await supabase
+        .from("weekly_outing_slots")
+        .select("id,weekly_outing_id,slot_date,conductor_id,hora,lugar,note,highlighted")
+        .eq("id", slotId)
+        .maybeSingle();
+      if (existingSlotError || !existingSlot) return fail(existingSlotError?.message ?? "Salida no encontrada.", 404);
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (payload?.hora !== undefined) patch.hora = payload.hora ? String(payload.hora) : null;
       if (payload?.lugar !== undefined) patch.lugar = payload.lugar ? String(payload.lugar) : null;
       if (payload?.conductor_id !== undefined) patch.conductor_id = payload.conductor_id ? String(payload.conductor_id) : null;
       if (payload?.highlighted !== undefined) patch.highlighted = Boolean(payload.highlighted);
       if (payload?.note !== undefined) patch.note = payload.note ? String(payload.note) : null;
-      const { error } = await supabase.from("weekly_outing_slots").update(patch).eq("id", String(payload?.id));
+      const { error } = await supabase.from("weekly_outing_slots").update(patch).eq("id", slotId);
       if (error) return fail(error.message);
+      const conductorId = typeof patch.conductor_id === "string" ? patch.conductor_id : existingSlot.conductor_id;
+      if (conductorId) {
+        const assignmentChanged = patch.conductor_id !== undefined && patch.conductor_id !== existingSlot.conductor_id;
+        const updatedFields = ["hora", "lugar", "note", "highlighted"].filter((field) => patch[field] !== undefined);
+        if (assignmentChanged || updatedFields.length) {
+          const eventType = assignmentChanged ? "OUTING_ASSIGNED" : "OUTING_UPDATED";
+          const naturalKey = assignmentChanged
+            ? `weekly-outing-slot:${slotId}:assigned:${conductorId}`
+            : `weekly-outing-slot:${slotId}:updated:${updatedFields.map((field) => `${field}=${String(patch[field])}`).join("|")}`;
+          await emitDomainEvent({ type: eventType, naturalKey, actorId: profile.id, payload: { recipientId: conductorId, slotId, weeklyOutingId: existingSlot.weekly_outing_id, slotDate: existingSlot.slot_date, detail: updatedFields.length ? `Cambios: ${updatedFields.join(", ")}.` : undefined } });
+        }
+      }
       return ok();
     }
 

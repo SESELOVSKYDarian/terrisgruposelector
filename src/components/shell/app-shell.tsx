@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Bell,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CommandPalette } from "@/components/command-palette/command-palette";
+import { NotificationCenter } from "@/components/notifications/notification-center";
 
 export type ShellAccess = {
   canManageUsers: boolean;
@@ -69,6 +70,14 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useEffect(() => {
+    void fetch("/api/notifications", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ unreadCount: number }> : null)
+      .then((data) => { if (data) setUnreadNotifications(data.unreadCount); })
+      .catch(() => {});
+  }, []);
   const reduceMotion = useReducedMotion();
   const sections = sectionItems(access).map((section) => ({ ...section, items: section.items.filter((item) => item.visible !== false) })).filter((section) => section.items.length);
   const transition = reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" as const };
@@ -85,7 +94,7 @@ export function AppShell({
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5"><img alt="PR" className="h-full w-full object-contain" src="/PR.svg" /></span>
         {!collapsed || mobile ? <span className="min-w-0 flex-1 truncate text-sm font-semibold">PR Territorios</span> : null}
         <button className="shell-icon-button" onClick={() => setCommandPaletteOpen(true)} type="button" aria-label="Abrir paleta de comandos"><Search size={18} /></button>
-        <button className="shell-icon-button" type="button" aria-label="Notificaciones (próximamente)"><Bell size={18} /></button>
+        <button className="shell-icon-button relative" onClick={() => setNotificationCenterOpen(true)} type="button" aria-label={unreadNotifications ? `${unreadNotifications} notificaciones sin leer` : "Notificaciones"}><Bell size={18} />{unreadNotifications ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span> : null}</button>
         {mobile ? <button className="shell-icon-button" onClick={() => setMobileOpen(false)} type="button" aria-label="Cerrar menú"><X size={18} /></button> : <button className="shell-icon-button hidden lg:inline-flex" onClick={() => setCollapsed((value) => !value)} type="button" aria-label={collapsed ? "Expandir barra lateral" : "Contraer barra lateral"}><ChevronsLeft className={cn(collapsed && "rotate-180")} size={18} /></button>}
       </div>
       <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto px-2 py-4">
@@ -109,6 +118,7 @@ export function AppShell({
       {sections.flatMap((section) => section.items).slice(0, 4).map((item) => <NavButton compact item={item} key={item.id} active={activeView === item.id} onClick={() => onChange(item.id)} />)}
     </nav>
     <CommandPalette access={access} onCreateOuting={onCreateOuting} onNavigate={onChange} open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} userId={user.username} />
+    <NotificationCenter onNavigate={onChange} onUnreadCount={setUnreadNotifications} open={notificationCenterOpen} onOpenChange={setNotificationCenterOpen} />
   </div>;
 }
 

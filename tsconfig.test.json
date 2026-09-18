@@ -9,7 +9,8 @@
     "rootDir": "."
   },
   "include": [
-    "tests/permissions.test.ts",
-    "src/modules/users/permissions.ts"
+    "tests/**/*.test.ts",
+    "src/modules/users/permissions.ts",
+    "src/server/events/processor.ts"
   ]
 }

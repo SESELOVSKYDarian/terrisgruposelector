@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc -p tsconfig.test.json && node --test node_modules/.cache/terris-tests/tests/permissions.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test node_modules/.cache/terris-tests/tests/*.test.js"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^14.0.0",
