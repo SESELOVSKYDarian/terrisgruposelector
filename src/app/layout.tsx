@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "PR Territorios",
@@ -20,7 +17,7 @@ export default async function RootLayout({
   const theme = cookieStore.get("theme")?.value === "light" ? "light" : "dark";
 
   return (
-    <html lang="es" data-theme={theme} className={`h-full antialiased ${inter.variable}`} suppressHydrationWarning>
+    <html lang="es" data-theme={theme} className="h-full antialiased" suppressHydrationWarning>
       <body className="min-h-full bg-background text-foreground" suppressHydrationWarning>
         {children}
       </body>

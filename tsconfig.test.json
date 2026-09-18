@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "node_modules/.cache/terris-tests",
+    "rootDir": "."
+  },
+  "include": [
+    "tests/permissions.test.ts",
+    "src/modules/users/permissions.ts"
+  ]
+}

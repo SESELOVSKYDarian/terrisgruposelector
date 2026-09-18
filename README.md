@@ -18,6 +18,11 @@ de sabado/domingo.
 3. Si ya habias ejecutado la version anterior, ejecutar tambien `supabase/custom-auth-migration.sql`.
    Para registrar la fecha de finalizacion de los territorios, ejecutar tambien
    `supabase/completion-date-migration.sql`.
+   Para incorporar el modelo V2 de nombramientos, caracteristicas y responsabilidades
+   sin alterar los roles legacy, ejecutar despues
+   `supabase/fase-1-user-permissions-migration.sql`. Antes de produccion, hacer
+   el backup indicado en el plan V2 y ejecutar luego
+   `supabase/fase-1-permissions-verification.sql` para revisar conteos e invariantes.
 4. Copiar `.env.example` a `.env.local` o completar `.env`.
 5. Completar:
 
