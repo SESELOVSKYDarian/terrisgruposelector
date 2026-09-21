@@ -63,7 +63,7 @@ export function CommandPalette({ access, onCreateOuting, onNavigate, open, onOpe
     const canOpenRecent = (entry: Entry) => entry.type === "territory" ? access.canManageTerritories : entry.type === "user" ? access.canManageUsers : entry.type === "announcement" ? true : access.canPlanOutings;
     const recentItems = !term ? recents.filter(canOpenRecent).map((entry) => ({ ...entry, icon: iconFor(entry.type), section: "Recientes" as const, onSelect: selectEntry(entry) })) : [];
     return [...recentItems, ...matchingCommands, ...results];
-  }, [access.canManageTerritories, access.canManageUsers, access.canPlanOutings, entries, onCreateOuting, onNavigate, onOpenChange, query, recents, userId]);
+  }, [access.canManageTerritories, access.canManageUsers, access.canPlanOutings, access.canPublishAnnouncements, entries, onCreateOuting, onNavigate, onOpenChange, query, recents, userId]);
   const activeIndex = Math.min(selected, Math.max(items.length - 1, 0));
   const close = () => { onOpenChange(false); setQuery(""); };
   const keyboard = (event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Escape") { event.preventDefault(); close(); } else if (event.key === "ArrowDown") { event.preventDefault(); setSelected(items.length ? (activeIndex + 1) % items.length : 0); } else if (event.key === "ArrowUp") { event.preventDefault(); setSelected(items.length ? (activeIndex - 1 + items.length) % items.length : 0); } else if (event.key === "Enter" && items[activeIndex]) { event.preventDefault(); items[activeIndex].onSelect(); } };

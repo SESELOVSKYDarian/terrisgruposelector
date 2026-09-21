@@ -211,3 +211,85 @@ Las decisiones de permiso se centralizarán en `src/modules/users/permissions.ts
 ## Open questions
 
 No hay una decisión bloqueante para Fase 1. La equivalencia temporal `ADMIN` legacy a Coordinador V2 se implementará únicamente como puente de compatibilidad, documentada y auditable; no modifica ni elimina los datos legacy. IDs/URLs y credenciales de los dos Google Docs S-13, y el proyecto externo de edificios, quedan explícitamente fuera hasta las fases de integración correspondientes.
+
+---
+
+# Estado final de la implementación (Fase 21)
+
+Todas las fases 0–21 están implementadas y commiteadas. Cada fase cerró con `tsc`, `lint` (0 errores), `npm test` y `npm run build` en verde. **No se ejecutó contra una base Supabase real ni se probó la UI con datos**: eso requiere las migraciones aplicadas y una sesión, y se cubre con la checklist manual de abajo. Sí se verificó con el build de producción levantado que todas las rutas `/api/v2/*` (y las de notificaciones, buscador, navegación, push, cron) rechazan pedidos sin sesión con 401.
+
+## Qué se construyó (por fase)
+
+| Fase | Resultado | Migración |
+| --- | --- | --- |
+| 1 | Nombramientos / características / responsabilidades, elegibilidad validada en servidor y en DB, backfill desde roles legacy | `fase-1-user-permissions-migration.sql` |
+| 2–3 | Sidebar único, menú de perfil, Ctrl+K (centrado en pantalla completa) | — |
+| 4 | Eventos de dominio idempotentes + bandeja de notificaciones por usuario | `fase-4-events-notifications-migration.sql` |
+| 5 | PWA, Web Push multi‑dispositivo, cron de recordatorios | `fase-5-push-scheduler-migration.sql` |
+| 6 | Planificación borrador → revisión → publicada, estados de salida, `starts_at` real (America/Argentina/Buenos_Aires), `audit_log` | `fase-6-weekly-planning-workflow-migration.sql` |
+| 7 | Plantilla semanal recurrente con conductor estrella; la semana es el override | `fase-7-recurring-conductors-migration.sql` |
+| 8 | Salida por Grupo: ventana, respuesta compartida, prórroga, recordatorios; alimenta planificación y reservas | `fase-8-group-outings-migration.sql` |
+| 9 | Mis salidas, informe del conductor precargado, vueltas Casa en Casa | `fase-9-outing-reports-migration.sql` |
+| 10 | S‑13 interno generado desde las vueltas (2 documentos, 4 rondas por página) | `fase-10-s13-migration.sql` |
+| 11 | Mapa SVG interactivo sobre el JPG original | `fase-11-territory-map-migration.sql` |
+| 12 | No visitar + advertencias en salidas | `fase-12-do-not-visit-migration.sql` |
+| 13 | Telefónico, algoritmo de 20 números, Zoom y cambio por lluvia | `fase-13-telephone-migration.sql` |
+| 14 | Anuncios con fan‑out de notificación + push | `fase-14-announcements-migration.sql` |
+| 15 | Edificios, grilla de timbres versionada (función SQL atómica), propuestas | `fase-15-buildings-migration.sql` |
+| 16 | Falta censar + Aplicar corrección con detección de conflicto (misma transacción) | `fase-16-building-census-migration.sql` |
+| 17 | Trabajo por departamento, revisitas, bloqueos configurables, deshacer, desbloqueo | `fase-17-building-activity-migration.sql` |
+| 18 | Vueltas de edificios (cierre automático, reapertura al deshacer) | (usa fase 17) |
+| 19 | Territorios personales (períodos de 3 meses desde la asignación) | `fase-19-personal-territories-migration.sql` |
+| 20 | Sincronización S‑13 → Google Docs preparada (dry‑run, staging, producción con guardas) | `fase-20-s13-sync-migration.sql` |
+| 21 | Ajustes personales y del sistema reales, retiro del navbar/topbar legacy, verificación final | `fase-21-final-verification.sql` (solo lectura) |
+
+## Cómo llevarlo a producción (runbook)
+
+1. **Backup** administrado de Supabase y ejecutar el bloque 1 de `supabase/fase-21-final-verification.sql` (conteos). Guardar el resultado.
+2. Aplicar en una **copia/staging** primero. Cada migración es aditiva e idempotente y se ejecuta completa en el SQL editor, **en este orden**:
+   `fase-1` → `fase-4` → `fase-5` → `fase-6` → `fase-7` → `fase-8` → `fase-9` → `fase-10` → `fase-11` → `fase-12` → `fase-13` → `fase-14` → `fase-15` → `fase-16` → `fase-17` → `fase-19` → `fase-20`.
+   Dependencias: 16 reemplaza la función creada en 15; 17 necesita 15; 19 modifica `telephone_call_results` (13) y `territory_visits` (9); 8 y 9 necesitan 6.
+3. Ejecutar `fase-1-permissions-verification.sql`, `fase-6-planning-verification.sql` y el resto de `fase-21-final-verification.sql`: los conteos del bloque 1 deben coincidir con el paso 1 y los bloques 3 y 4 no deben mostrar faltantes ni violaciones. Revisar `weekly_outing_time_backfill_issues` (horas en texto libre que no se pudieron interpretar).
+4. **Variables de entorno** (ver `.env.example`): además de las de Supabase, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (push), `CRON_SECRET` y `RESEND_API_KEY`. Opcionales y apagadas por defecto: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `S13_GOOGLE_WRITE_ENABLED`.
+5. **Cron**: llamar cada 15–30 minutos a `GET /api/cron/reminders` con `Authorization: Bearer $CRON_SECRET` (Vercel Cron o un servicio externo). Es idempotente.
+6. Asignar responsabilidades V2 (el puente legacy `ADMIN` deja de valer para planificar o publicar apenas existe un titular de la responsabilidad correspondiente).
+7. Recién con staging validado, repetir en producción. El código nuevo tolera migraciones pendientes en las lecturas principales (degrada en vez de romper), pero las pantallas V2 requieren su migración.
+
+## Rollback
+
+- Todo es aditivo: revertir es desplegar el commit anterior. Las tablas y columnas nuevas quedan intactas y **no se borra ninguna fila**.
+- Si una constraint nueva revelara un dato histórico incompatible, no se borra el dato: se corrige con una migración de reparación auditada.
+- Devolver una planificación a borrador y deshacer marcas de edificios se hace por la propia app y queda en `audit_log`.
+
+## Decisiones tomadas donde la spec no era explícita
+
+- **Puente `ADMIN` legacy**: conserva planificar, publicar y gestionar territorios solo mientras nadie tenga la responsabilidad V2 equivalente; el Coordinador por sí solo no planifica.
+- **Semanas existentes** quedan PUBLICADAS; las nuevas nacen en borrador y los conductores no reciben aviso hasta publicar.
+- **Devolver a borrador** es una transición agregada para el revisor.
+- **Semana = override**: las filas de la semana son el override de la plantilla recurrente; ajustar una semana no toca la estrella.
+- **Una revisita cuenta para la vuelta** mientras siga activa, aunque se haya abierto en una vuelta anterior; **desbloquear** libera también las revisitas.
+- **Nombre S‑13** (apellido + inicial) es una heurística sobre `full_name` (último término = apellido).
+- **Fotos de "falta censar"** se guardan comprimidas como JPEG en la propia fila (sin Storage).
+- **Reservas legacy y Salida por Grupo conviven**: la respuesta del grupo crea o actualiza las reservas (y por lo tanto los bloqueos) y la salida en la planificación.
+
+## Pendientes / requieren algo tuyo
+
+- **Mapa**: subir el JPG a `public/maps/` y dibujar las formas (Territorios → Mapa).
+- **Google Docs**: entregar los links reales y una copia de prueba; falta implementar el cliente (OAuth + `documents.get`) y verificarlo contra la copia antes de habilitar `STAGING` o `PRODUCTION`. El mapeo celda → fila/columna del layout debe confirmarse contra el documento real.
+- **Proyecto externo de edificios**: sin importación; el módulo tiene límites claros (`server/buildings`) para agregarla.
+- **Validación con datos reales** (checklist siguiente) y prueba en dispositivos móviles.
+- Deuda menor conocida: `src/app/page.tsx` conserva las vistas legacy (Ventanas, Reservas y bloqueos admin, Territorios, Vueltas, Usuarios, Grupos) hasta comprobar equivalencia; 2 advertencias de lint por `<img>`.
+
+## Checklist manual de QA (con datos reales o staging)
+
+- [ ] Login, registro, OTP y passkey siguen funcionando; una cuenta real conserva su acceso.
+- [ ] Usuarios: las condiciones incompatibles se rechazan en la UI y en el servidor.
+- [ ] Planificación: el Siervo prepara y envía; el Superintendente aprueba y publica; un usuario común solo ve lo publicado; editar lo publicado notifica al conductor y al Superintendente.
+- [ ] Plantilla recurrente: una semana nueva nace con los conductores estrella; ajustar una semana no cambia la plantilla.
+- [ ] Salida por Grupo: abrir ventana, completar como Superintendente, el Auxiliar ve "Completado por…", prórroga y recordatorios (probar `/api/cron/reminders`).
+- [ ] Mis salidas: informe precargado, "Agregar otro territorio", cierre de vuelta y S‑13 con "Asignado a" del primer conductor.
+- [ ] Zoom por lluvia: 3+5+9 = 27 números, notificación al conductor y borrador de anuncio.
+- [ ] Edificios: crear, proponer y aprobar, "Falta censar" + "Aplicar corrección" (probar el conflicto editando el edificio entre medio), revisita, bloqueo, desbloqueo, deshacer y cierre de vuelta.
+- [ ] Territorio personal: período 15/9 → 15/12 → 15/3, informe por modalidad y recordatorios.
+- [ ] PWA instalable en Android; push en un celular; sin push la campanita sigue funcionando.
+- [ ] `fase-21-final-verification.sql`: bloques 3 y 4 sin violaciones.

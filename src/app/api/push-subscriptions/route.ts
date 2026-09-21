@@ -17,8 +17,11 @@ async function profileOrUnauthorized() {
 }
 
 export async function GET() {
-  if (!await profileOrUnauthorized()) return fail("No autenticado.", 401);
-  return ok({ vapidPublicKey: getPublicVapidKey() });
+  const profile = await profileOrUnauthorized();
+  if (!profile) return fail("No autenticado.", 401);
+  // The person's own devices, for the personal settings screen (never anyone else's).
+  const { data } = await createAdminSupabaseClient().from("push_subscriptions").select("device_id, device_name, enabled, updated_at").eq("profile_id", profile.id).order("updated_at", { ascending: false });
+  return ok({ vapidPublicKey: getPublicVapidKey(), devices: data ?? [] });
 }
 
 export async function POST(request: Request) {

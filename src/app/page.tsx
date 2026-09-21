@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  ClipboardList,
   Clock,
   Copy,
   Edit3,
@@ -80,6 +79,8 @@ import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit
 import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
 import { BuildingsBrowser } from "@/components/v2/buildings/buildings-browser";
 import { PersonalAssignmentsManager, PersonalTerritoryPanel } from "@/components/v2/personal/personal-territory-panel";
+import { PersonalSettings } from "@/components/v2/settings/personal-settings";
+import { SystemSettings } from "@/components/v2/settings/system-settings";
 import { clearTab, peekTab } from "@/components/v2/highlight";
 import { requestNavigation, saveAnnouncementDraft } from "@/components/v2/announcement-draft";
 import { AnnouncementsPanel } from "@/components/v2/announcements/announcements-panel";
@@ -718,7 +719,7 @@ export default function Home() {
       <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onCreateOuting={isPlanner ? () => void createOutingFromPalette() : undefined} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
-          <PersonalSettingsView activeView={activeView} />
+          <PersonalSettings person={{ full_name: profile.full_name, username: profile.username, email: profile.email, roles: profile.roles }} view={activeView} />
         ) : activeView === "outings" ? (
           <div className="view-transition min-w-0" key="outings">
             <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />
@@ -730,6 +731,10 @@ export default function Home() {
         ) : activeView === "personalTerritory" && shellAccess.hasPersonalTerritory ? (
           <div className="view-transition min-w-0" key="personalTerritory">
             <PersonalTerritoryPanel />
+          </div>
+        ) : activeView === "settings" && shellAccess.canManageSystem ? (
+          <div className="view-transition min-w-0" key="settings">
+            <SystemSettings />
           </div>
         ) : activeView === "announcements" ? (
           <div className="view-transition min-w-0" key="announcements">
@@ -909,341 +914,6 @@ function ReservationsHub({ legacy }: { legacy: ReactNode }) {
   );
 }
 
-function AdminNav({
-  activeView,
-  onChange,
-}: {
-  activeView: string;
-  onChange: (view: string) => void;
-}) {
-  const tabGroups: Array<{ label: string; items: Array<{ id: string; label: string; icon: ReactNode }> }> = [
-    { label: "", items: [{ id: "dashboard", label: "Resumen", icon: <ShieldCheck size={17} /> }] },
-    {
-      label: "Territorios",
-      items: [
-        { id: "outings", label: "Salidas semanales", icon: <CalendarDays size={17} /> },
-        { id: "weekendRoster", label: "Conductores de fin de semana", icon: <Users size={17} /> },
-        { id: "territories", label: "Territorios", icon: <MapIcon size={17} /> },
-        { id: "rounds", label: "Vueltas", icon: <Grid3X3 size={17} /> },
-        { id: "departurePoints", label: "Puntos de salida", icon: <MapPin size={17} /> },
-      ],
-    },
-    {
-      label: "Reservas",
-      items: [
-        { id: "windows", label: "Ventanas", icon: <CalendarDays size={17} /> },
-        { id: "reservations", label: "Reservas", icon: <CalendarClock size={17} /> },
-        { id: "blocks", label: "Bloqueos", icon: <ShieldCheck size={17} /> },
-      ],
-    },
-    {
-      label: "Cuentas",
-      items: [
-        { id: "groups", label: "Grupos", icon: <Users size={17} /> },
-        { id: "users", label: "Usuarios", icon: <KeyRound size={17} /> },
-      ],
-    },
-    {
-      label: "Conductores",
-      items: [
-        { id: "conductorVisit", label: "Actualizar territorio", icon: <MapIcon size={17} /> },
-        { id: "s13", label: "Registro S-13", icon: <ClipboardList size={17} /> },
-      ],
-    },
-  ];
-
-  return (
-    <aside className="admin-sidebar glass-panel flex min-w-0 flex-col gap-3 rounded-2xl p-3 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]" aria-label="Administracion">
-      <div className="flex shrink-0 items-center gap-3 px-2 py-2">
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-foreground/[0.05] p-1.5">
-          <img alt="PR Territorios" className="h-full w-full object-contain" src="/PR.svg" />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">PR Territorios</p>
-          <p className="truncate text-xs text-muted">Administración</p>
-        </div>
-      </div>
-
-      <nav className="scrollbar-hidden flex gap-1 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3 lg:overflow-y-auto lg:pb-0" aria-label="Secciones">
-        {tabGroups.map((group, index) => (
-          <div className="shrink-0 lg:space-y-1" key={group.label || `group-${index}`}>
-            {group.label ? <p className="hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted lg:block">{group.label}</p> : null}
-            {group.items.map(({ id, label, icon }) => (
-              <button key={id} className={tabClass(activeView === id)} onClick={() => onChange(id)} type="button" aria-current={activeView === id ? "page" : undefined}>
-                <span className="shrink-0">{icon}</span>
-                <span className="whitespace-nowrap">{label}</span>
-              </button>
-            ))}
-          </div>
-        ))}
-      </nav>
-    </aside>
-  );
-}
-
-function AdminTopbar({
-  activeView,
-  currentUser,
-  data,
-  mutate,
-  onLogout,
-  setActiveView,
-  setModal,
-}: {
-  activeView: string;
-  currentUser: Profile;
-  data: AppData;
-  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
-  onLogout: () => void;
-  setActiveView: (view: string) => void;
-  setModal: (modal: ModalState) => void;
-}) {
-  const sectionLabels: Record<string, string> = {
-    dashboard: "Resumen",
-    windows: "Ventanas",
-    reservations: "Reservas",
-    blocks: "Bloqueos",
-    territories: "Territorios",
-    rounds: "Vueltas",
-    outings: "Salidas semanales",
-    weekendRoster: "Conductores de fin de semana",
-    departurePoints: "Puntos de salida",
-    groups: "Grupos",
-    users: "Usuarios",
-    conductorVisit: "Actualizar territorio",
-    s13: "Registro S-13",
-  };
-  return (
-    <header className="glass-panel flex min-h-16 flex-wrap items-center gap-3 rounded-[1.35rem] px-3 py-2.5 sm:px-4">
-      <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{sectionLabels[activeView] ?? "Administración"}</h1>
-      <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-none">
-        <TopbarSearch data={data} setActiveView={setActiveView} setModal={setModal} />
-        <ThemeToggle />
-        <NotificationsBell data={data} mutate={mutate} />
-        <AccountMenu currentUser={currentUser} onLogout={onLogout} />
-      </div>
-    </header>
-  );
-}
-
-type SearchResult = { id: string; type: string; label: string; sublabel?: string; onSelect: () => void };
-
-function TopbarSearch({
-  data,
-  setActiveView,
-  setModal,
-}: {
-  data: AppData;
-  setActiveView: (view: string) => void;
-  setModal: (modal: ModalState) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-
-  const results = useMemo<SearchResult[]>(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return [];
-    const matches: SearchResult[] = [];
-
-    for (const territory of data.territories) {
-      if (!`territorio ${territory.number}`.includes(term)) continue;
-      matches.push({
-        id: `territory:${territory.id}`,
-        type: "Territorio",
-        label: `Territorio #${territory.number}`,
-        onSelect: () => {
-          setActiveView("territories");
-          setModal({ type: "territoryBlocks", territory });
-        },
-      });
-    }
-    for (const item of data.profiles) {
-      if (!item.full_name.toLowerCase().includes(term) && !item.username.toLowerCase().includes(term)) continue;
-      matches.push({
-        id: `user:${item.id}`,
-        type: "Usuario",
-        label: item.full_name,
-        sublabel: `@${item.username}`,
-        onSelect: () => setActiveView("users"),
-      });
-    }
-    for (const window of data.reservationWindows) {
-      if (!window.name.toLowerCase().includes(term)) continue;
-      matches.push({
-        id: `window:${window.id}`,
-        type: "Ventana",
-        label: window.name,
-        onSelect: () => setActiveView("windows"),
-      });
-    }
-    for (const group of data.groups) {
-      if (!group.name.toLowerCase().includes(term)) continue;
-      matches.push({
-        id: `group:${group.id}`,
-        type: "Grupo",
-        label: group.name,
-        onSelect: () => setActiveView("groups"),
-      });
-    }
-
-    return matches.slice(0, 8);
-  }, [data.groups, data.profiles, data.reservationWindows, data.territories, query, setActiveView, setModal]);
-
-  function select(result: SearchResult) {
-    result.onSelect();
-    setQuery("");
-    setOpen(false);
-  }
-
-  return (
-    <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
-      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} aria-hidden="true" />
-      <input
-        className="h-10 w-full rounded-xl bg-white/[0.06] pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:ring-4 focus:ring-primary/10"
-        onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder="Buscar territorio, usuario, ventana..."
-        type="text"
-        value={query}
-      />
-      {open && query.trim() ? (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[280px] overflow-hidden rounded-[1.1rem] bg-[#0c1615] shadow-2xl">
-            {results.length ? (
-              <div className="max-h-[60vh] divide-y divide-white/8 overflow-y-auto">
-                {results.map((result) => (
-                  <button className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-white/[0.05]" key={result.id} onClick={() => select(result)} type="button">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-white">{result.label}</span>
-                      {result.sublabel ? <span className="block truncate text-xs text-slate-500">{result.sublabel}</span> : null}
-                    </span>
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">{result.type}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="px-4 py-4 text-center text-sm text-slate-400">Sin resultados.</p>
-            )}
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function NotificationsBell({
-  data,
-  mutate,
-}: {
-  data: AppData;
-  mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
-}) {
-  const [open, setOpen] = useState(false);
-  const notifications = data.notifications;
-  const unread = notifications.filter((item) => !item.read_at);
-
-  return (
-    <div className="relative shrink-0">
-      <button
-        className={cn(
-          "relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-          open
-            ? "bg-sky-500/15 text-sky-200"
-            : "bg-white/[0.05] text-slate-300 hover:bg-white/[0.09] hover:text-white",
-        )}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-        aria-expanded={open}
-        aria-label={unread.length ? `Avisos, ${unread.length} sin leer` : "Avisos"}
-      >
-        <Bell size={17} aria-hidden="true" />
-        {unread.length ? <span className="absolute -right-1 -top-1 min-w-5 rounded-full border-2 border-black bg-sky-400 px-1 text-center text-[10px] font-bold leading-4 text-slate-950">{unread.length > 99 ? "99+" : unread.length}</span> : null}
-      </button>
-      {open ? (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-[1.35rem] bg-[#0c1615] shadow-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
-              <p className="text-sm font-semibold text-white">Avisos</p>
-              {unread.length ? (
-                <button className="text-xs font-semibold text-primary hover:text-primary-hover" onClick={() => void mutate("markNotificationRead")} type="button">
-                  Marcar todos
-                </button>
-              ) : null}
-            </div>
-            <div className="max-h-[60vh] divide-y divide-white/8 overflow-y-auto">
-              {notifications.length ? notifications.map((notification) => (
-                <button
-                  className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-white/[0.03]"
-                  key={notification.id}
-                  onClick={() => (!notification.read_at ? void mutate("markNotificationRead", { id: notification.id }) : undefined)}
-                  type="button"
-                >
-                  <span className={cn("mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full", notification.read_at ? "bg-transparent" : "bg-sky-400")} aria-hidden="true" />
-                  <span className="min-w-0">
-                    <span className={cn("block text-sm", !notification.read_at && "font-semibold text-white")}>{notification.message}</span>
-                    <span className="mt-1 block text-xs text-slate-500">{displayDateTime(notification.created_at)}</span>
-                  </span>
-                </button>
-              )) : (
-                <p className="px-4 py-6 text-center text-sm text-slate-400">Todavia no hay avisos.</p>
-              )}
-            </div>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function AccountMenu({
-  currentUser,
-  onLogout,
-}: {
-  currentUser: Profile;
-  onLogout: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const initials = currentUser.full_name
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-
-  return (
-    <div className="relative shrink-0">
-      <button
-        className={cn(
-          "inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-2xl text-xs font-bold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-          open ? "bg-primary/20" : "bg-white/[0.08] hover:bg-white/[0.12]",
-        )}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-        aria-expanded={open}
-        aria-label="Cuenta"
-      >
-        {initials}
-      </button>
-      {open ? (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,260px)] overflow-hidden rounded-[1.25rem] bg-[#0c1615] shadow-2xl">
-            <div className="border-b border-white/8 px-4 py-3">
-              <p className="truncate text-sm font-semibold text-white">{currentUser.full_name}</p>
-              <p className="truncate text-xs text-slate-500">@{currentUser.username}</p>
-            </div>
-            <button className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-slate-200 transition hover:bg-white/[0.05]" onClick={onLogout} type="button">
-              <LogOut size={16} aria-hidden="true" />Cerrar sesión
-            </button>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
 function ElderReservations({
   data,
   loadedAt,
@@ -1405,17 +1075,6 @@ function AdminView({
   }
 
   return <ShellPlaceholder title="Sección en preparación" text="Esta ruta ya usa la navegación V2; la pantalla operativa se migrará sin retirar los flujos existentes." />;
-}
-
-function PersonalSettingsView({ activeView }: { activeView: string }) {
-  const content: Record<string, { title: string; text: string }> = {
-    account: { title: "Mi cuenta", text: "La edición de datos personales se incorporará aquí." },
-    appearance: { title: "Apariencia", text: "El selector de tema actual se conserva mientras esta preferencia se migra a la cuenta." },
-    notifications: { title: "Notificaciones", text: "Las preferencias se conectarán cuando se implemente el centro de notificaciones." },
-    devices: { title: "Dispositivos", text: "La administración de dispositivos y passkeys se incorporará aquí." },
-    shortcuts: { title: "Atajos", text: "Los atajos se documentarán junto con la paleta de comandos de la Fase 3." },
-  };
-  return <ShellPlaceholder {...content[activeView]} />;
 }
 
 function ShellPlaceholder({ title, text }: { title: string; text: string }) {
@@ -2551,7 +2210,7 @@ function addDays(date: string, days: number) {
 }
 
 function displayDateEs(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
+  const [, month, day] = date.split("-").map(Number);
   return `${day} de ${monthNamesEs[month - 1]}`;
 }
 

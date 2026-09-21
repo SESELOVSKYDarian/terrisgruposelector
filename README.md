@@ -51,6 +51,14 @@ npm install
 npm run dev
 ```
 
+## PR Territorios V2
+
+La V2 (planificación con revisión, Mis salidas, S-13, mapa, telefónico/Zoom, edificios, anuncios,
+territorios personales, PWA/push y recordatorios) se agrega con migraciones aditivas
+`supabase/fase-N-*.sql`. El orden de aplicación, las variables de entorno, el cron, el rollback y la
+checklist de QA están en `docs/PR_TERRITORIOS_V2_MASTER_PLAN.md` (sección "Estado final de la
+implementación"). Verificación: `supabase/fase-21-final-verification.sql`. Tests: `npm test`.
+
 ## Reglas principales
 
 - Un territorio tiene numero unico.

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/server/auth";
-import { formatTemplateHora, isValidHora } from "@/modules/outings/recurring";
+import { isValidHora } from "@/modules/outings/recurring";
 import { canEditWeek } from "@/modules/outings/workflow";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
 import { materializeTemplate, loadTemplate } from "@/server/outings/recurring";
