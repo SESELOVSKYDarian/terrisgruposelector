@@ -10,10 +10,26 @@ import { Card, Empty, Notice, Pill, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 import { BuildingDetail, type BuildingData } from "./building-detail";
 import { CensusInbox, type CensusRow } from "./census-inbox";
+import { lockUnitLabels, type LockDuration } from "@/modules/buildings/activity";
 
 type Item = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number };
 type Proposal = { id: string; territory_id: string; territory_number: number; address: string; author: string | null };
-type State = { canManage: boolean; buildings: Item[]; census: CensusRow[]; territories: { id: string; number: number; name: string | null }[]; proposals: Proposal[] };
+type State = { canManage: boolean; lock: LockDuration | null; buildings: Item[]; census: CensusRow[]; territories: { id: string; number: number; name: string | null }[]; proposals: Proposal[] };
+
+/** Temporary lock after a doorbell was worked without a revisit: configurable, never a hardcoded 30 days. */
+function LockSetting({ lock, run, busy }: { lock: LockDuration; run: (action: string, payload?: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
+  const [amount, setAmount] = useState(String(lock.amount));
+  const [unit, setUnit] = useState<LockDuration["unit"]>(lock.unit);
+  return (
+    <Card title="Tiempo de bloqueo" description="Cuánto queda bloqueado un departamento después de trabajarlo sin interés o sin que atiendan.">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm text-muted">Cantidad<input className={cn(fieldClass, "mt-1 block w-24")} inputMode="numeric" onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} value={amount} /></label>
+        <div className="w-40"><Select onChange={(value) => setUnit(value as LockDuration["unit"])} options={(Object.keys(lockUnitLabels) as LockDuration["unit"][]).map((key) => ({ value: key, label: lockUnitLabels[key] }))} size="compact" value={unit} /></div>
+        <button className={primarySmallButtonClass} disabled={busy || !amount} onClick={() => void run("setLockDuration", { amount: Number(amount), unit })} type="button">Guardar</button>
+      </div>
+    </Card>
+  );
+}
 
 /**
  * Buildings of a territory (or of all of them for managers). Everyone who can consult the
@@ -52,6 +68,8 @@ export function BuildingsBrowser({ territoryId, detailExtras }: { territoryId?: 
         <input aria-label="Buscar edificio" className={cn(fieldClass, "min-w-56 flex-1")} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por dirección (ej. Paso 123)" type="search" value={query} />
         {!territoryId ? <div className="w-52"><Select onChange={setFilter} options={[{ value: "", label: "Todos los territorios" }, ...data.territories.map((entry) => ({ value: entry.id, label: `Territorio ${entry.number}` }))]} size="compact" value={filter} /></div> : null}
       </div>
+
+      {data.canManage && data.lock ? <LockSetting busy={busy} lock={data.lock} run={run} /> : null}
 
       <CensusInbox busy={busy} items={data.census} onOpenEditor={(row) => { setEvidence(row); setOpenId(row.building_id); }} run={run} />
 

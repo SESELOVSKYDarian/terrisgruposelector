@@ -22,6 +22,7 @@
     "src/modules/map/geometry.ts",
     "src/modules/telephone/assignment.ts",
     "src/modules/buildings/structure.ts",
+    "src/modules/buildings/activity.ts",
     "src/modules/announcements/validation.ts",
     "src/server/events/processor.ts",
     "src/server/scheduler/reminders.ts"

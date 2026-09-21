@@ -7,6 +7,7 @@ import { createBuilding, decideProposal, listBuildings, loadBuilding, proposeBui
 import { writeAudit } from "@/server/outings/planning";
 import { applyCensusCorrection, censusPhoto, dismissCensus, listPendingCensus, reportMissingCensus } from "@/server/buildings/census";
 import { censusReasons } from "@/modules/buildings/structure";
+import { getLockDuration, loadUnitStatuses, markUnit, releaseRevisit, setLockDuration, undoActivity, unlockUnits } from "@/server/buildings/activity";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,11 @@ const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reportCensus"), payload: z.object({ building_id: z.string().uuid(), base_version: z.number().int().min(1), reason: z.enum(censusReasons), description: z.string().max(1500).nullable().optional(), photo_data: z.string().max(900000).nullable().optional(), diff: z.array(z.unknown()).max(50).nullable().optional() }) }),
   z.object({ action: z.literal("applyCorrection"), payload: z.object({ id: z.string().uuid() }) }),
   z.object({ action: z.literal("dismissCensus"), payload: z.object({ id: z.string().uuid(), note: z.string().max(400).nullable().optional() }) }),
+  z.object({ action: z.literal("markUnit"), payload: z.object({ unit_id: z.string().uuid(), attended: z.boolean(), interested: z.boolean().nullable().optional() }) }),
+  z.object({ action: z.literal("undoActivity"), payload: z.object({ id: z.string().uuid(), reason: z.string().max(300).nullable().optional() }) }),
+  z.object({ action: z.literal("releaseRevisit"), payload: z.object({ unit_id: z.string().uuid() }) }),
+  z.object({ action: z.literal("unlock"), payload: z.object({ scope: z.enum(["UNIT", "BUILDING", "TERRITORY"]), id: z.string().uuid() }) }),
+  z.object({ action: z.literal("setLockDuration"), payload: z.object({ amount: z.number().int(), unit: z.enum(["days", "weeks", "months"]) }) }),
   z.object({ action: z.literal("setStatus"), payload: z.object({ building_id: z.string().uuid(), active: z.boolean() }) }),
 ]);
 
@@ -36,7 +42,7 @@ export async function GET(request: NextRequest) {
       if (!z.string().uuid().safeParse(buildingId).success) throw new ApiError("Edificio inválido.", 422);
       const building = await loadBuilding(supabase, buildingId);
       if (!building || !canAccessTerritory(access, building.territory_id)) throw new ApiError("Edificio no encontrado.", 404);
-      return { canManage: access.canManage, building };
+      return { canManage: access.canManage, me: profile.id, me_name: profile.full_name, building, statuses: await loadUnitStatuses(supabase, buildingId, profile, access.canManage) };
     }
 
     const photoId = params.get("censusPhoto");
@@ -66,6 +72,7 @@ export async function GET(request: NextRequest) {
     if (territories.error) throw new Error(territories.error.message);
     return {
       canManage: access.canManage,
+      lock: access.canManage ? await getLockDuration(supabase) : null,
       buildings,
       census,
       territories: territories.data ?? [],
@@ -91,8 +98,13 @@ export async function POST(request: Request) {
     }
 
     if (action === "reportCensus") return reportMissingCensus(supabase, profile, access, payload);
+    if (action === "markUnit") return markUnit(supabase, profile, access, payload);
+    if (action === "undoActivity") return undoActivity(supabase, profile, access, payload);
+    if (action === "releaseRevisit") return releaseRevisit(supabase, profile, access, payload.unit_id);
 
     if (!access.canManage) forbid("Solo Superintendente de Servicio o Siervo de Territorios administran los edificios.");
+    if (action === "unlock") return unlockUnits(supabase, profile, payload);
+    if (action === "setLockDuration") return setLockDuration(supabase, profile.id, payload);
     if (action === "applyCorrection") return applyCensusCorrection(supabase, profile, payload.id);
     if (action === "dismissCensus") return dismissCensus(supabase, profile, payload);
     if (action === "create") return { id: await createBuilding(supabase, { ...payload, actorId: profile.id }) };

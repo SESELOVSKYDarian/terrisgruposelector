@@ -7,12 +7,13 @@ import { gridSize, normalizeLabel, type Unit } from "@/modules/buildings/structu
 import { cn } from "@/lib/utils";
 import { Card, Notice, Pill, fieldClass } from "../ui";
 import { CensusReportForm } from "./census-report-form";
+import { UnitCell, type UnitStatusView } from "./unit-cell";
 import type { CensusRow } from "./census-inbox";
 import { describeDiff } from "@/modules/buildings/structure";
 import { useModuleApi } from "../use-module-api";
 
 export type BuildingData = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; units: Unit[] };
-type Detail = { canManage: boolean; building: BuildingData };
+type Detail = { canManage: boolean; me: string; me_name: string; building: BuildingData; statuses: Record<string, UnitStatusView> };
 
 function StructureEditor({ building, onSaved, onCancel }: { building: BuildingData; onSaved: () => void; onCancel: () => void }) {
   const [units, setUnits] = useState<Unit[]>(building.units.map((unit) => ({ ...unit })));
@@ -89,11 +90,21 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
   const [editing, setEditing] = useState(Boolean(startEditing));
   const [reporting, setReporting] = useState(false);
   const [reported, setReported] = useState(false);
+  const [unlockConfirm, setUnlockConfirm] = useState<"building" | "territory" | null>(null);
+  const [unlockMessage, setUnlockMessage] = useState("");
   if (loading) return <Notice>Cargando edificio…</Notice>;
   if (!data) return <Notice tone="error">{error || "No se pudo cargar el edificio."}</Notice>;
 
   const { building, canManage } = data;
   const size = gridSize(building.units);
+
+  async function unlock(scope: "BUILDING" | "TERRITORY") {
+    const response = await fetch("/api/v2/buildings", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unlock", payload: { scope, id: scope === "BUILDING" ? building.id : building.territory_id } }) });
+    const body = await response.json().catch(() => ({}));
+    setUnlockConfirm(null);
+    setUnlockMessage(response.ok ? `Desbloqueado: ${body.unlocked ?? 0} registro(s) liberados.` : body.error ?? "No se pudo desbloquear.");
+    if (response.ok) void reload();
+  }
   return (
     <div className="space-y-3">
       <button className={miniButtonClass} onClick={onBack} type="button"><ArrowLeft size={14} aria-hidden="true" />Volver</button>
@@ -102,9 +113,10 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
           Evidencia del informe: {evidence.description || "sin descripción"}{evidence.diff ? ` · Propuesta: ${describeDiff(evidence.diff)}` : ""}{evidence.base_version !== building.structure_version ? " · El edificio cambió desde que se informó." : ""}
         </Notice>
       ) : null}
+      {unlockMessage ? <Notice tone="info">{unlockMessage}</Notice> : null}
       {reported ? <Notice tone="success">Informe enviado: Servicio y Territorios lo van a revisar.</Notice> : null}
       {reporting ? <CensusReportForm buildingId={building.id} onCancel={() => setReporting(false)} onDone={() => { setReporting(false); setReported(true); }} units={building.units} version={building.structure_version} /> : null}
-      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}</div>}>
+      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}{canManage && !editing ? (unlockConfirm ? (<><button className={miniButtonClass} onClick={() => void unlock(unlockConfirm === "building" ? "BUILDING" : "TERRITORY")} type="button">Confirmar desbloqueo {unlockConfirm === "building" ? "del edificio" : `del territorio ${building.territory_number}`}</button><button className={miniButtonClass} onClick={() => setUnlockConfirm(null)} type="button">Cancelar</button></>) : (<><button className={miniButtonClass} onClick={() => setUnlockConfirm("building")} type="button">Desbloquear edificio</button><button className={miniButtonClass} onClick={() => setUnlockConfirm("territory")} type="button">Desbloquear territorio</button></>)) : null}</div>}>
         {editing ? (
           <StructureEditor building={building} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />
         ) : building.units.length ? (
@@ -114,7 +126,9 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
               const col = index % size.cols;
               const unit = building.units.find((entry) => entry.row === row && entry.col === col);
               if (!unit) return <div key={`${row}:${col}`} />;
-              return renderUnit ? <div key={unit.id ?? `${row}:${col}`}>{renderUnit(unit, building)}</div> : <div className="flex min-h-14 items-center justify-center rounded-lg border border-border bg-foreground/[0.04] text-sm font-semibold text-foreground" key={unit.id ?? `${row}:${col}`}>{unit.label}</div>;
+              const status = unit.id ? data.statuses[unit.id] : undefined;
+              if (renderUnit) return <div key={unit.id ?? `${row}:${col}`}>{renderUnit(unit, building)}</div>;
+              return status ? <UnitCell building={building} canManage={canManage} key={unit.id ?? `${row}:${col}`} me={data.me} meName={data.me_name} onChanged={() => void reload()} status={status} unit={unit} /> : <div className="flex min-h-14 items-center justify-center rounded-lg border border-border bg-foreground/[0.04] text-sm font-semibold text-foreground" key={unit.id ?? `${row}:${col}`}>{unit.label}</div>;
             })}
           </div>
         ) : (
