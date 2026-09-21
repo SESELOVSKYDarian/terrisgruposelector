@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useHighlight } from "../highlight";
 import { DoNotVisitWarning } from "../do-not-visit";
 import { PhoneResults, type PhoneBlock } from "../telephone/phone-results";
+import { BuildingsBrowser } from "../buildings/buildings-browser";
 import { Card, Empty, Notice, Pill, SubTabs, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 
@@ -105,6 +106,21 @@ function ReportForm({ slot, state, onCancel, run, busy }: { slot: Slot; state: S
   );
 }
 
+function SlotBuildings({ territories }: { territories: Territory[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!territories.length) return null;
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap gap-1.5">
+        {territories.map((territory) => (
+          <button aria-pressed={open === territory.territory_id} className={cn(miniButtonClass, open === territory.territory_id && "bg-primary/20 text-primary")} key={territory.territory_id} onClick={() => setOpen((current) => (current === territory.territory_id ? null : territory.territory_id))} type="button">Edificios · T{territory.number}</button>
+        ))}
+      </div>
+      {open ? <div className="mt-3"><BuildingsBrowser territoryId={open} /></div> : null}
+    </div>
+  );
+}
+
 function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (action: string, payload?: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const cancelled = slot.status === "CANCELADA";
@@ -123,6 +139,7 @@ function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (
       </div>
       <DoNotVisitWarning items={slot.territories.flatMap((territory) => (territory.do_not_visit ?? []).map((address) => ({ id: `${territory.territory_id}:${address}`, number: territory.number, address })))} />
       <p className="mt-2 text-sm text-foreground/90">{slot.territories.length ? slot.territories.map((territory) => `Territorio ${territory.number}`).join(" + ") : "Sin territorios asignados"}</p>
+      {!slot.is_zoom && slot.status !== "CANCELADA" ? <SlotBuildings territories={slot.territories} /> : null}
       {slot.report ? <p className="mt-1 text-xs text-muted" data-entity-id={slot.report.id}>{slot.report.on_behalf ? `Cargado por ${slot.report.submitted_by_name ?? "otra persona"}` : "Cargado por el conductor"}{slot.report.entries.length ? ` · ${slot.report.entries.map((entry) => `T${entry.number}: ${entry.done_labels.length} manzana${entry.done_labels.length === 1 ? "" : "s"}`).join(", ")}` : ""}</p> : null}
       {!cancelled && !open ? (
         <button className={cn(miniButtonClass, "mt-3")} onClick={() => setOpen(true)} type="button">{slot.is_zoom ? (slot.phone?.done === slot.phone?.total && slot.phone?.total ? "Ver resultados" : "Cargar resultados") : slot.report ? "Editar informe" : "Completar"}</button>

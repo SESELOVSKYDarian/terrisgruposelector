@@ -156,3 +156,17 @@ export async function resolvePlannerIds(supabase: AdminSupabase) {
   }
   return resolveReviewerIds(supabase);
 }
+
+/** Superintendente de Servicio + Siervo de Territorios (who approve buildings, census fixes, unlocks). */
+export async function resolveTerritoryManagerIds(supabase: AdminSupabase) {
+  const ids = new Set<string>();
+  for (const responsibility of ["SIERVO_TERRITORIOS", "SUPERINTENDENTE_SERVICIO"] as const) {
+    try {
+      for (const id of await holdersOf(supabase, responsibility)) ids.add(id);
+    } catch (error) {
+      console.warn(`No se pudieron leer los titulares de ${responsibility}.`, error);
+    }
+  }
+  if (ids.size) return [...ids];
+  return resolveReviewerIds(supabase);
+}

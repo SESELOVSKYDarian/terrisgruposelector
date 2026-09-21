@@ -78,6 +78,8 @@ import { S13View } from "@/components/v2/territories/s13-view";
 import { MapView } from "@/components/v2/territories/map-view";
 import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
 import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
+import { BuildingsBrowser } from "@/components/v2/buildings/buildings-browser";
+import { clearTab, peekTab } from "@/components/v2/highlight";
 import { requestNavigation, saveAnnouncementDraft } from "@/components/v2/announcement-draft";
 import { AnnouncementsPanel } from "@/components/v2/announcements/announcements-panel";
 import { warningsForTerritories, type DoNotVisitItem } from "@/modules/territories/do-not-visit";
@@ -868,12 +870,16 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "phone" as const, label: "Telefónico" }, { id: "dnv" as const, label: "No visitar" }];
-  const [tab, setTab] = useState<"list" | "map" | "s13" | "phone" | "dnv">(tabs[0].id);
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "map" | "s13" | "buildings" | "phone" | "dnv">(() => {
+    const requested = peekTab("territories");
+    return tabs.find((entry) => entry.id === requested)?.id ?? tabs[0].id;
+  });
+  useEffect(() => () => clearTab("territories"), []);
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : <S13View />}
     </div>
   );
 }

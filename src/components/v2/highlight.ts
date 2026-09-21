@@ -41,3 +41,31 @@ export function useHighlight(ready: boolean) {
     return () => window.clearTimeout(timer);
   }, [ready]);
 }
+
+const TAB_PREFIX = "v2:tab:";
+
+/** A deep link may also ask a hub (e.g. Territorios) to open a specific tab. */
+export function rememberTab(view: string, tab: string | null) {
+  try {
+    if (tab) window.sessionStorage.setItem(TAB_PREFIX + view, tab);
+  } catch {
+    // Opening the default tab is an acceptable fallback.
+  }
+}
+
+/** Reads the requested tab without consuming it (safe under StrictMode's double initializers). */
+export function peekTab(view: string): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_PREFIX + view);
+  } catch {
+    return null;
+  }
+}
+
+export function clearTab(view: string) {
+  try {
+    window.sessionStorage.removeItem(TAB_PREFIX + view);
+  } catch {
+    // ignore
+  }
+}
