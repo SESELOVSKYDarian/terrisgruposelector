@@ -94,3 +94,14 @@ export function isDoneForRound(activities: ActivityRow[], roundId: string, now: 
   if (live.some((activity) => activity.round_id === roundId)) return true;
   return unitStatus(activities, now).state === "REVISITA";
 }
+
+export type RoundProgress = { total: number; done: number; complete: boolean };
+
+/**
+ * Progress of a building's round: every ACTIVE unit must be done for the round (worked in it or
+ * held as an active revisita). A building with no units never completes a round.
+ */
+export function roundProgress(units: { id: string; activities: ActivityRow[] }[], roundId: string, now: Date): RoundProgress {
+  const done = units.filter((unit) => isDoneForRound(unit.activities, roundId, now)).length;
+  return { total: units.length, done, complete: units.length > 0 && done === units.length };
+}

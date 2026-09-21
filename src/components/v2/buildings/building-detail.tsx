@@ -13,7 +13,7 @@ import { describeDiff } from "@/modules/buildings/structure";
 import { useModuleApi } from "../use-module-api";
 
 export type BuildingData = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; units: Unit[] };
-type Detail = { canManage: boolean; me: string; me_name: string; building: BuildingData; statuses: Record<string, UnitStatusView> };
+type Detail = { canManage: boolean; me: string; me_name: string; building: BuildingData; statuses: Record<string, UnitStatusView>; round: { current: { round_number: number; started_at: string; total: number; done: number } | null; history: { round_number: number; started_at: string; closed_at: string }[] } };
 
 function StructureEditor({ building, onSaved, onCancel }: { building: BuildingData; onSaved: () => void; onCancel: () => void }) {
   const [units, setUnits] = useState<Unit[]>(building.units.map((unit) => ({ ...unit })));
@@ -92,6 +92,7 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
   const [reported, setReported] = useState(false);
   const [unlockConfirm, setUnlockConfirm] = useState<"building" | "territory" | null>(null);
   const [unlockMessage, setUnlockMessage] = useState("");
+  const [roundNote, setRoundNote] = useState("");
   if (loading) return <Notice>Cargando edificio…</Notice>;
   if (!data) return <Notice tone="error">{error || "No se pudo cargar el edificio."}</Notice>;
 
@@ -114,9 +115,10 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
         </Notice>
       ) : null}
       {unlockMessage ? <Notice tone="info">{unlockMessage}</Notice> : null}
+      {roundNote ? <Notice tone="success">{roundNote}</Notice> : null}
       {reported ? <Notice tone="success">Informe enviado: Servicio y Territorios lo van a revisar.</Notice> : null}
       {reporting ? <CensusReportForm buildingId={building.id} onCancel={() => setReporting(false)} onDone={() => { setReporting(false); setReported(true); }} units={building.units} version={building.structure_version} /> : null}
-      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}{canManage && !editing ? (unlockConfirm ? (<><button className={miniButtonClass} onClick={() => void unlock(unlockConfirm === "building" ? "BUILDING" : "TERRITORY")} type="button">Confirmar desbloqueo {unlockConfirm === "building" ? "del edificio" : `del territorio ${building.territory_number}`}</button><button className={miniButtonClass} onClick={() => setUnlockConfirm(null)} type="button">Cancelar</button></>) : (<><button className={miniButtonClass} onClick={() => setUnlockConfirm("building")} type="button">Desbloquear edificio</button><button className={miniButtonClass} onClick={() => setUnlockConfirm("territory")} type="button">Desbloquear territorio</button></>)) : null}</div>}>
+      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}${data.round.current ? ` · Vuelta ${data.round.current.round_number}: ${data.round.current.done} de ${data.round.current.total} trabajados` : ""}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}{canManage && !editing ? (unlockConfirm ? (<><button className={miniButtonClass} onClick={() => void unlock(unlockConfirm === "building" ? "BUILDING" : "TERRITORY")} type="button">Confirmar desbloqueo {unlockConfirm === "building" ? "del edificio" : `del territorio ${building.territory_number}`}</button><button className={miniButtonClass} onClick={() => setUnlockConfirm(null)} type="button">Cancelar</button></>) : (<><button className={miniButtonClass} onClick={() => setUnlockConfirm("building")} type="button">Desbloquear edificio</button><button className={miniButtonClass} onClick={() => setUnlockConfirm("territory")} type="button">Desbloquear territorio</button></>)) : null}</div>}>
         {editing ? (
           <StructureEditor building={building} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />
         ) : building.units.length ? (
@@ -128,13 +130,18 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
               if (!unit) return <div key={`${row}:${col}`} />;
               const status = unit.id ? data.statuses[unit.id] : undefined;
               if (renderUnit) return <div key={unit.id ?? `${row}:${col}`}>{renderUnit(unit, building)}</div>;
-              return status ? <UnitCell building={building} canManage={canManage} key={unit.id ?? `${row}:${col}`} me={data.me} meName={data.me_name} onChanged={() => void reload()} status={status} unit={unit} /> : <div className="flex min-h-14 items-center justify-center rounded-lg border border-border bg-foreground/[0.04] text-sm font-semibold text-foreground" key={unit.id ?? `${row}:${col}`}>{unit.label}</div>;
+              return status ? <UnitCell building={building} canManage={canManage} key={unit.id ?? `${row}:${col}`} me={data.me} meName={data.me_name} onChanged={(result) => { const closed = result?.round_closed as number | null | undefined; setRoundNote(closed ? `Vuelta ${closed} completada: todos los departamentos fueron trabajados. Empieza la vuelta ${closed + 1}.` : result?.round_reopened ? "Se reabrió la vuelta porque se deshizo el último departamento." : ""); void reload(); }} status={status} unit={unit} /> : <div className="flex min-h-14 items-center justify-center rounded-lg border border-border bg-foreground/[0.04] text-sm font-semibold text-foreground" key={unit.id ?? `${row}:${col}`}>{unit.label}</div>;
             })}
           </div>
         ) : (
           <p className="text-sm text-muted">Este edificio todavía no tiene timbres cargados.{canManage ? " Usá «Editar estructura» para agregarlos." : " Informá que falta censarlo."}</p>
         )}
       </Card>
+      {data.round.history.length ? (
+        <p className="px-1 text-xs text-muted">
+          Vueltas cerradas: {data.round.history.map((round) => `#${round.round_number} (${new Date(round.closed_at).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })})`).join(" · ")}
+        </p>
+      ) : null}
     </div>
   );
 }

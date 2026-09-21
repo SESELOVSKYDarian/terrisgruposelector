@@ -38,7 +38,7 @@ function YesNo({ label, value, onChange }: { label: string; value: boolean | nul
   );
 }
 
-function UnitDialog({ unit, status, building, me, meName, canManage, onClose, onChanged }: { unit: Unit; status: UnitStatusView; building: { address: string; territory_number: number }; me: string; meName: string; canManage: boolean; onClose: () => void; onChanged: () => void }) {
+function UnitDialog({ unit, status, building, me, meName, canManage, onClose, onChanged }: { unit: Unit; status: UnitStatusView; building: { address: string; territory_number: number }; me: string; meName: string; canManage: boolean; onClose: () => void; onChanged: (result?: Record<string, unknown>) => void }) {
   const [attended, setAttended] = useState<boolean | null>(null);
   const [interested, setInterested] = useState<boolean | null>(null);
   const [working, setWorking] = useState(false);
@@ -49,8 +49,8 @@ function UnitDialog({ unit, status, building, me, meName, canManage, onClose, on
     setBusy(true);
     setError("");
     try {
-      await post(action, payload);
-      onChanged();
+      const result = await post(action, payload);
+      onChanged(result);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Error inesperado.");
@@ -102,7 +102,7 @@ function UnitDialog({ unit, status, building, me, meName, canManage, onClose, on
 }
 
 /** One doorbell in the grid: colour = state, tap = the quick "¿Atendió? / ¿Mostró interés?" flow. */
-export function UnitCell({ unit, status, building, me, meName, canManage, onChanged }: { unit: Unit; status: UnitStatusView; building: { address: string; territory_number: number }; me: string; meName: string; canManage: boolean; onChanged: () => void }) {
+export function UnitCell({ unit, status, building, me, meName, canManage, onChanged }: { unit: Unit; status: UnitStatusView; building: { address: string; territory_number: number }; me: string; meName: string; canManage: boolean; onChanged: (result?: Record<string, unknown>) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>

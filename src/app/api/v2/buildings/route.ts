@@ -7,6 +7,7 @@ import { createBuilding, decideProposal, listBuildings, loadBuilding, proposeBui
 import { writeAudit } from "@/server/outings/planning";
 import { applyCensusCorrection, censusPhoto, dismissCensus, listPendingCensus, reportMissingCensus } from "@/server/buildings/census";
 import { censusReasons } from "@/modules/buildings/structure";
+import { loadRoundSummary } from "@/server/buildings/rounds";
 import { getLockDuration, loadUnitStatuses, markUnit, releaseRevisit, setLockDuration, undoActivity, unlockUnits } from "@/server/buildings/activity";
 
 export const runtime = "nodejs";
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       if (!z.string().uuid().safeParse(buildingId).success) throw new ApiError("Edificio inválido.", 422);
       const building = await loadBuilding(supabase, buildingId);
       if (!building || !canAccessTerritory(access, building.territory_id)) throw new ApiError("Edificio no encontrado.", 404);
-      return { canManage: access.canManage, me: profile.id, me_name: profile.full_name, building, statuses: await loadUnitStatuses(supabase, buildingId, profile, access.canManage) };
+      return { canManage: access.canManage, me: profile.id, me_name: profile.full_name, building, statuses: await loadUnitStatuses(supabase, buildingId, profile, access.canManage), round: await loadRoundSummary(supabase, buildingId) };
     }
 
     const photoId = params.get("censusPhoto");

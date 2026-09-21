@@ -6,6 +6,7 @@ import { formatConductorName } from "@/modules/territories/names";
 import { ApiError, forbid } from "@/server/api";
 import { writeAudit, type AdminSupabase } from "@/server/outings/planning";
 import { canAccessTerritory, type BuildingAccess } from "./access";
+import { evaluateRound, reconsiderClosedRound } from "./rounds";
 
 const ACTIVITY_COLUMNS = "id, unit_id, user_id, attended, interested, outcome, worked_at, next_available_at, revisit_active, undone_at, unlocked_at, round_id";
 
@@ -124,7 +125,9 @@ export async function markUnit(supabase: AdminSupabase, profile: SessionProfile,
   if (previous) await supabase.from("building_unit_activity").update({ revisit_active: false, revisit_released_at: now.toISOString(), revisit_released_by: profile.id }).eq("id", previous);
 
   await writeAudit(supabase, { actorId: profile.id, action: outcome === "REVISITA" ? "UNIT_REVISIT_MARKED" : "UNIT_WORKED", entityType: "building_unit", entityId: context.unit.id, metadata: { building_id: context.building.id, territory_id: context.building.territory_id, round_id: roundId, unit: context.unit.label }, after: { attended: input.attended, interested: input.attended ? Boolean(input.interested) : null, outcome } });
-  return { id: data.id as string, outcome, round_id: roundId, building_id: context.building.id };
+  // The mark may complete the building's round (every doorbell done): close it and open the next.
+  const evaluation = await evaluateRound(supabase, context.building.id, profile.id, now);
+  return { id: data.id as string, outcome, round_id: roundId, building_id: context.building.id, round_closed: evaluation.closed };
 }
 
 /** Undo keeps the row (undone_at/by) so the history explains what happened. */
@@ -139,7 +142,9 @@ export async function undoActivity(supabase: AdminSupabase, profile: SessionProf
   const { error: updateError } = await supabase.from("building_unit_activity").update({ undone_at: now.toISOString(), undone_by: profile.id, undo_reason: input.reason || null }).eq("id", input.id).is("undone_at", null);
   if (updateError) throw new Error(updateError.message);
   await writeAudit(supabase, { actorId: profile.id, action: "UNIT_MARK_UNDONE", entityType: "building_unit", entityId: context.unit.id, metadata: { building_id: context.building.id, activity_id: input.id, reason: input.reason ?? null, by_manager: access.canManage && row.user_id !== profile.id } });
-  return { building_id: context.building.id };
+  // If the undone mark had closed the round, reopen it (unless the next round already has marks).
+  const reconsidered = await reconsiderClosedRound(supabase, context.building.id, (row.round_id as string | null) ?? null, profile.id, now);
+  return { building_id: context.building.id, round_reopened: reconsidered.reopened, round_reopen_blocked: reconsidered.blocked };
 }
 
 /** "Quitar revisita": the owner (or a manager) frees the doorbell again. */

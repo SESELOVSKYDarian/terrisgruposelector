@@ -83,3 +83,29 @@ test("quién puede deshacer: el autor sobre su marca más reciente, o un respons
   // Una marca vieja del autor ya no es la más reciente.
   assert.equal(canUndo(status, { id: "older", user_id: "perez" }, "perez", false), false);
 });
+
+import { roundProgress } from "../src/modules/buildings/activity";
+
+test("la vuelta del edificio se completa cuando todos los departamentos activos fueron trabajados (revisita incluida)", () => {
+  const worked = (unit: string, extra: Partial<ActivityRow> = {}) => activity({ id: `a-${unit}`, unit_id: unit, outcome: "TRABAJADO", attended: false, interested: null, revisit_active: false, next_available_at: "2026-10-24T15:00:00Z", ...extra });
+  const units = [
+    { id: "u1", activities: [worked("u1")] },
+    { id: "u2", activities: [activity({ id: "a-u2", unit_id: "u2" })] }, // revisita activa: cuenta
+    { id: "u3", activities: [] },
+  ];
+  assert.deepEqual(roundProgress(units, "r1", NOW), { total: 3, done: 2, complete: false });
+  units[2].activities = [worked("u3")];
+  assert.deepEqual(roundProgress(units, "r1", NOW), { total: 3, done: 3, complete: true });
+  // Un edificio sin timbres nunca cierra una vuelta.
+  assert.deepEqual(roundProgress([], "r1", NOW), { total: 0, done: 0, complete: false });
+});
+
+test("los bloqueos de la vuelta anterior siguen vigentes en la nueva: no cuentan como trabajados en ella", () => {
+  const previousRound = activity({ id: "old", round_id: "r1", outcome: "TRABAJADO", attended: false, interested: null, revisit_active: false, next_available_at: "2026-10-24T15:00:00Z" });
+  // En la vuelta r2 sigue bloqueado (no se puede trabajar) pero todavía no cuenta como hecho.
+  assert.equal(unitStatus([previousRound], NOW).state, "BLOQUEADO");
+  assert.deepEqual(roundProgress([{ id: "u1", activities: [previousRound] }], "r2", NOW), { total: 1, done: 0, complete: false });
+  // Cuando vence el bloqueo se puede trabajar y recién ahí suma a la vuelta 2.
+  const later = new Date("2026-10-25T00:00:00Z");
+  assert.equal(unitStatus([previousRound], later).state, "DISPONIBLE");
+});

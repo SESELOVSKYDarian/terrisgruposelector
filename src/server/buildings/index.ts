@@ -4,6 +4,7 @@ import type { SessionProfile } from "@/lib/server/auth";
 import { autoLayout, validateUnits, type Unit } from "@/modules/buildings/structure";
 import { ApiError } from "@/server/api";
 import { resolveTerritoryManagerIds, safeEmit, writeAudit, type AdminSupabase } from "@/server/outings/planning";
+import { evaluateRound } from "./rounds";
 
 export type BuildingListItem = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number };
 
@@ -129,5 +130,11 @@ export async function saveStructure(supabase: AdminSupabase, actorId: string, in
     throw new Error(error.message);
   }
   await writeAudit(supabase, { actorId, action: "BUILDING_STRUCTURE_SAVED", entityType: "building", entityId: input.building_id, metadata: { version: data, report_id: input.report_id ?? null }, after: { units: validated.units.length } });
+  // Removing doorbells can complete the current round; a round-evaluation hiccup never undoes the save.
+  try {
+    await evaluateRound(supabase, input.building_id, actorId);
+  } catch (roundError) {
+    console.warn("No se pudo reevaluar la vuelta del edificio:", roundError);
+  }
   return { version: data as number };
 }
