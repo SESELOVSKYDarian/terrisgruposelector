@@ -71,6 +71,7 @@ import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
 import { SubTabs } from "@/components/v2/ui";
 import { RecurringConductorsPanel } from "@/components/v2/outings/recurring-conductors-panel";
+import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -182,6 +183,7 @@ type WeeklyOutingSlot = {
   highlighted: boolean;
   note: string | null;
   status?: SlotStatus;
+  group_id?: string | null;
   time_parse_status?: "PARSED" | "EMPTY" | "UNPARSEABLE" | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
   weekly_outing_slot_territories: WeeklyOutingSlotTerritory[];
@@ -698,6 +700,18 @@ export default function Home() {
           <div className="view-transition min-w-0" key="outings">
             <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />
           </div>
+        ) : activeView === "reservations" && shellAccess.canUseReservations ? (
+          <div className="view-transition min-w-0" key="reservations">
+            <ReservationsHub
+              legacy={
+                isAdmin ? (
+                  <AdminView activeView="reservations" data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} mutate={mutate} />
+                ) : isAnciano ? (
+                  <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
+                ) : null
+              }
+            />
+          </div>
         ) : isAdmin ? (
           <div className="view-transition min-w-0" key={activeView}>
             <AdminView
@@ -817,6 +831,26 @@ export default function Home() {
         onConfirm={() => resolveConfirmation(true)}
       />
     </main>
+  );
+}
+
+/** Reservas: Salida por grupo (V2) plus the existing reservation/blocks view. */
+function ReservationsHub({ legacy }: { legacy: ReactNode }) {
+  const [tab, setTab] = useState<"groups" | "legacy">("groups");
+  return (
+    <div className="space-y-4">
+      {legacy ? (
+        <SubTabs
+          onChange={setTab}
+          tabs={[
+            { id: "groups", label: "Salida por grupo" },
+            { id: "legacy", label: "Reservas y bloqueos" },
+          ]}
+          value={tab}
+        />
+      ) : null}
+      {tab === "groups" || !legacy ? <GroupOutingsPanel /> : legacy}
+    </div>
   );
 }
 
@@ -2918,6 +2952,7 @@ function WeeklyOutingSlotCard({
         <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-300"><TriangleAlert size={12} aria-hidden="true" />Hora sin interpretar: &ldquo;{slot.hora}&rdquo;. Elegí una hora para corregirla.</p>
       ) : null}
       {cancelled ? <p className="mt-1.5 text-xs font-medium text-rose-300">Salida cancelada</p> : null}
+      {slot.group_id ? <p className="mt-1.5 text-xs font-medium text-primary">Salida por grupo: {data.groups.find((group) => group.id === slot.group_id)?.name ?? "Grupo"}</p> : null}
 
       <div className="mt-2 flex items-center gap-2">
         <User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />

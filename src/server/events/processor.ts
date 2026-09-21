@@ -1,8 +1,9 @@
 export type InternalNotification = { eventId: string; recipientId: string; type: string; title: string; description: string; entityType: string; entityId: string; targetUrl: string };
-export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; territoryRoundId?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; audience?: "conductor" | "reviewer" } };
+export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; territoryRoundId?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; windowId?: string; audience?: "conductor" | "reviewer" } };
 export type InternalEventRepository = { createInternalNotification: (notification: InternalNotification) => Promise<boolean>; recordDelivery: (eventId: string, recipientId: string) => Promise<void> };
 
 const OUTINGS_URL = "/?view=outings";
+const RESERVATIONS_URL = "/?view=reservations";
 
 function withDetail(text: string, detail?: string) {
   return detail ? `${text} ${detail}` : text;
@@ -29,6 +30,14 @@ export function buildNotification(event: InternalEvent): InternalNotification | 
     if (event.event_type === "OUTING_CANCELLED") {
       return { ...base, ...slot, title: reviewer ? "Salida cancelada" : "Tu salida fue cancelada", description: withDetail(`${reviewer ? "Se canceló una salida" : "Se canceló tu salida"} del ${payload.slotDate}.`, payload.detail) };
     }
+  }
+
+  if (payload.windowId && payload.title) {
+    const window = { entityType: "reservation_window", entityId: payload.windowId, targetUrl: RESERVATIONS_URL };
+    const body = withDetail(payload.title, payload.detail);
+    if (event.event_type === "GROUP_WINDOW_OPENED") return { ...base, ...window, title: "Salida por Grupo: completá la información", description: body };
+    if (event.event_type === "GROUP_WINDOW_REMINDER") return { ...base, ...window, title: "Recordatorio: Salida por Grupo", description: body };
+    if (event.event_type === "GROUP_RESERVATION_COMPLETED") return { ...base, ...window, title: "Salida por Grupo completada", description: body };
   }
 
   if (payload.outingId && payload.startsOn) {

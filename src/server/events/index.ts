@@ -35,6 +35,8 @@ type OutingEventPayload = {
   audience?: "conductor" | "reviewer";
 };
 
+type GroupWindowEventPayload = { recipientId: string; windowId: string; title: string; detail?: string };
+
 type OutingWeekEventPayload = { recipientId: string; outingId: string; startsOn: string; detail?: string };
 
 export type DomainEventPayloads = {
@@ -45,9 +47,9 @@ export type DomainEventPayloads = {
   OUTING_DRAFT_SUBMITTED: OutingWeekEventPayload;
   OUTING_DRAFT_RETURNED: OutingWeekEventPayload;
   OUTING_DRAFT_APPROVED: OutingWeekEventPayload;
-  GROUP_WINDOW_OPENED: { recipientId: string; windowId: string; title: string };
-  GROUP_WINDOW_REMINDER: { recipientId: string; windowId: string; title: string };
-  GROUP_RESERVATION_COMPLETED: { recipientId: string; reservationId: string; title: string };
+  GROUP_WINDOW_OPENED: GroupWindowEventPayload;
+  GROUP_WINDOW_REMINDER: GroupWindowEventPayload;
+  GROUP_RESERVATION_COMPLETED: GroupWindowEventPayload;
   VISIT_REPORT_DUE: { recipientId: string; territoryRoundId: string; title: string; targetUrl?: string };
   VISIT_REPORT_SUBMITTED: { recipientId: string; reportId: string; title: string };
   BUILDING_PROPOSED: { recipientId: string; proposalId: string; title: string };

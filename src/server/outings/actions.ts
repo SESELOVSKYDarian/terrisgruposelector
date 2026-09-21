@@ -44,9 +44,9 @@ export const OUTING_ACTIONS = new Set([
 ]);
 
 type Payload = Record<string, unknown> | undefined;
-type Ctx = { supabase: AdminSupabase; profile: SessionProfile; authority: PlanningAuthority };
+export type Ctx = { supabase: AdminSupabase; profile: SessionProfile; authority: PlanningAuthority };
 
-type SlotRow = SlotSnapshot & { id: string; weekly_outing_id: string; slot_date: string };
+export type SlotRow = SlotSnapshot & { id: string; weekly_outing_id: string; slot_date: string };
 
 const SLOT_COLUMNS = "id,weekly_outing_id,slot_date,conductor_id,hora,lugar,note,highlighted,status";
 const NOTIFIABLE_EXCLUDED = new Set(["destacada"]);
@@ -79,7 +79,7 @@ function slotSnapshot(slot: SlotRow): SlotSnapshot {
  * the affected conductor(s) and, when the editor cannot publish, the reviewers.
  * Drafts and weeks in review never notify conductors.
  */
-async function notifyPublishedSlotChange(
+export async function notifyPublishedSlotChange(
   ctx: Ctx,
   week: WeekRow,
   input: { slot: SlotRow; kind: "updated" | "cancelled"; changed: string[]; conductorAfter: string | null; stamp: string; detail?: string },
