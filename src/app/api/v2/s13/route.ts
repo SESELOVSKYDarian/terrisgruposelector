@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
 import { listS13Documents, loadS13Document } from "@/server/s13";
-import { configureSync, runS13Sync, syncStatus } from "@/server/s13/sync";
+import { compareWithDocuments, configureSync, runS13Sync, syncStatus } from "@/server/s13/sync";
 import { getTerritoryAccess } from "@/server/territories/access";
 
 export const runtime = "nodejs";
@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
 
 const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("sync"), payload: z.object({ code: z.string().min(1).max(40) }) }),
+  z.object({ action: z.literal("compare"), payload: z.object({ code: z.string().min(1).max(40) }) }),
   z.object({
     action: z.literal("configure"),
     payload: z.object({ code: z.string().min(1).max(40), sync_mode: z.enum(["DRY_RUN", "STAGING", "PRODUCTION"]), staging_document: z.string().max(400).nullable(), external_document: z.string().max(400).nullable(), staging_verified: z.boolean() }),
@@ -38,6 +39,8 @@ export async function POST(request: Request) {
     if (!(await getTerritoryAccess(profile)).canViewS13) forbid("No tenés permiso para sincronizar el S-13.");
     const { action, payload } = await parseBody(request, mutation);
     const supabase = createAdminSupabaseClient();
-    return action === "sync" ? runS13Sync(supabase, profile.id, payload.code) : configureSync(supabase, profile.id, payload);
+    if (action === "sync") return runS13Sync(supabase, profile.id, payload.code);
+    if (action === "compare") return compareWithDocuments(supabase, payload.code);
+    return configureSync(supabase, profile.id, payload);
   });
 }

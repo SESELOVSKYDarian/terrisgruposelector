@@ -76,6 +76,28 @@ export function cellCoordinates(key: string, firstTerritory: number, layout: S13
   return { page: parsed.page, row: topRow + 1, column: parsed.slot * 2 + (parsed.field === "to" ? 1 : 0) };
 }
 
+/** Changes grouped by the S-13 page (hoja) they belong to; each page is its own Google Doc. */
+export function groupChangesByPage(changes: CellChange[]) {
+  const byPage = new Map<number, CellChange[]>();
+  for (const change of changes) {
+    const parsed = parseCellKey(change.key);
+    if (!parsed) continue;
+    byPage.set(parsed.page, [...(byPage.get(parsed.page) ?? []), change]);
+  }
+  return byPage;
+}
+
+/**
+ * Pages 2..n that still have no Google Doc. Page 1 is the original document; every later page is a
+ * copy of the previous one, so the copies must be made in order.
+ */
+export function pagesNeedingCopy(pageCount: number, existingPages: Iterable<number>) {
+  const known = new Set(existingPages);
+  const missing: number[] = [];
+  for (let page = 2; page <= pageCount; page += 1) if (!known.has(page)) missing.push(page);
+  return missing;
+}
+
 /** Text range of a table cell in a Google Doc body (from documents.get), used to replace its content. */
 export type DocCellRange = { startIndex: number; endIndex: number };
 

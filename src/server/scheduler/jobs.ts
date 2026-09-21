@@ -6,6 +6,7 @@ import { emitDomainEvent } from "@/server/events";
 import { runGroupWindowReminders } from "@/server/groups/group-outings";
 import { runPersonalTerritoryReminders } from "@/server/personal";
 import type { AdminSupabase } from "@/server/outings/planning";
+import { runScheduledS13Sync } from "@/server/s13/sync";
 import { initialDriverReportDeadline, runDriverReportReminders, runReminderJobs, weekendReminderDueAt, type DriverReportReminderCandidate } from "./reminders";
 
 type SlotRow = { id: string; slot_date: string; starts_at: string; conductor_id: string; weekly_outings: { status: string | null } | { status: string | null }[] | null };
@@ -85,6 +86,7 @@ export async function runAllReminderJobs(now = new Date()) {
     driverReport: await guarded("driverReport", () => runDriverReportJob(supabase, now)),
     weekend: await guarded("weekend", () => runWeekendReminderJob(supabase, now)),
     personalTerritory: await guarded("personalTerritory", () => runPersonalTerritoryReminders(supabase, now)),
+    s13Sync: await guarded("s13Sync", () => runScheduledS13Sync(supabase)),
   };
   return { ...base, emitted: base.emitted + Object.values(jobs).reduce((total, job) => total + job.emitted, 0), jobs };
 }

@@ -241,16 +241,17 @@ Todas las fases 0–21 están implementadas y commiteadas. Cada fase cerró con 
 | 18 | Vueltas de edificios (cierre automático, reapertura al deshacer) | (usa fase 17) |
 | 19 | Territorios personales (períodos de 3 meses desde la asignación) | `fase-19-personal-territories-migration.sql` |
 | 20 | Sincronización S‑13 → Google Docs preparada (dry‑run, staging, producción con guardas) | `fase-20-s13-sync-migration.sql` |
+| 22 | Hojas del S-13: cada hoja es un Google Doc; al llenarse las 4 rondas se copia la anterior en blanco. Cliente real de Google Docs/Drive (apagado por defecto) | `fase-22-s13-pages-migration.sql` |
 | 21 | Ajustes personales y del sistema reales, retiro del navbar/topbar legacy, verificación final | `fase-21-final-verification.sql` (solo lectura) |
 
 ## Cómo llevarlo a producción (runbook)
 
-1. **Backup** administrado de Supabase y ejecutar el bloque 1 de `supabase/fase-21-final-verification.sql` (conteos). Guardar el resultado.
+1. **Backup** administrado de Supabase y ejecutar `supabase/fase-21-conteos-antes-de-migrar.sql` (conteos de tus datos reales, solo lectura). Guardar el resultado.
 2. Aplicar en una **copia/staging** primero. Cada migración es aditiva e idempotente y se ejecuta completa en el SQL editor, **en este orden**:
-   `fase-1` → `fase-4` → `fase-5` → `fase-6` → `fase-7` → `fase-8` → `fase-9` → `fase-10` → `fase-11` → `fase-12` → `fase-13` → `fase-14` → `fase-15` → `fase-16` → `fase-17` → `fase-19` → `fase-20`.
+   `fase-1` → `fase-4` → `fase-5` → `fase-6` → `fase-7` → `fase-8` → `fase-9` → `fase-10` → `fase-11` → `fase-12` → `fase-13` → `fase-14` → `fase-15` → `fase-16` → `fase-17` → `fase-19` → `fase-20` → `fase-22`.
    Dependencias: 16 reemplaza la función creada en 15; 17 necesita 15; 19 modifica `telephone_call_results` (13) y `territory_visits` (9); 8 y 9 necesitan 6.
-3. Ejecutar `fase-1-permissions-verification.sql`, `fase-6-planning-verification.sql` y el resto de `fase-21-final-verification.sql`: los conteos del bloque 1 deben coincidir con el paso 1 y los bloques 3 y 4 no deben mostrar faltantes ni violaciones. Revisar `weekly_outing_time_backfill_issues` (horas en texto libre que no se pudieron interpretar).
-4. **Variables de entorno** (ver `.env.example`): además de las de Supabase, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (push), `CRON_SECRET` y `RESEND_API_KEY`. Opcionales y apagadas por defecto: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `S13_GOOGLE_WRITE_ENABLED`.
+3. Ejecutar `fase-1-permissions-verification.sql`, `fase-6-planning-verification.sql` y `fase-21-final-verification.sql` (un solo resultado; solo debe haber filas OK/INFO, nada en REVISAR ni FALTA MIGRAR). Volver a correr `fase-21-conteos-antes-de-migrar.sql`: las filas deben ser iguales a las del paso 1. Revisar `weekly_outing_time_backfill_issues` (horas en texto libre que no se pudieron interpretar).
+4. **Variables de entorno** (ver `.env.example`): además de las de Supabase, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (push), `CRON_SECRET` y `RESEND_API_KEY`. Opcionales y apagadas por defecto (S-13 en Google Docs): `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `S13_GOOGLE_WRITE_ENABLED`, y para las hojas nuevas `S13_DRIVE_FOLDER_ID` (carpeta donde se guardan las copias) y `S13_SHARE_WITH_EMAILS` (correos, separados por coma, que reciben acceso de edición a cada copia).
 5. **Cron**: llamar cada 15–30 minutos a `GET /api/cron/reminders` con `Authorization: Bearer $CRON_SECRET` (Vercel Cron o un servicio externo). Es idempotente.
 6. Asignar responsabilidades V2 (el puente legacy `ADMIN` deja de valer para planificar o publicar apenas existe un titular de la responsabilidad correspondiente).
 7. Recién con staging validado, repetir en producción. El código nuevo tolera migraciones pendientes en las lecturas principales (degrada en vez de romper), pero las pantallas V2 requieren su migración.
@@ -275,7 +276,7 @@ Todas las fases 0–21 están implementadas y commiteadas. Cada fase cerró con 
 ## Pendientes / requieren algo tuyo
 
 - **Mapa**: subir el JPG a `public/maps/` y dibujar las formas (Territorios → Mapa).
-- **Google Docs**: entregar los links reales y una copia de prueba; falta implementar el cliente (OAuth + `documents.get`) y verificarlo contra la copia antes de habilitar `STAGING` o `PRODUCTION`. El mapeo celda → fila/columna del layout debe confirmarse contra el documento real.
+- **Google Docs**: links reales cargados por `fase-22`. Falta crear la cuenta de servicio de Google, compartirle los dos documentos como editor y cargar sus variables en Vercel; el cliente (JWT, `documents.get`, `batchUpdate`, `files.copy`) está implementado pero no se probó contra Google real. Empezar en `DRY_RUN`, usar **Comparar con el documento** (solo lectura) y recién después una copia de prueba en `STAGING`.
 - **Proyecto externo de edificios**: sin importación; el módulo tiene límites claros (`server/buildings`) para agregarla.
 - **Validación con datos reales** (checklist siguiente) y prueba en dispositivos móviles.
 - Deuda menor conocida: `src/app/page.tsx` conserva las vistas legacy (Ventanas, Reservas y bloqueos admin, Territorios, Vueltas, Usuarios, Grupos) hasta comprobar equivalencia; 2 advertencias de lint por `<img>`.

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { diffCells, decideWrite, extractGoogleDocId, pagesToCells, type CellChange, type CellMap, type SyncMode } from "@/modules/s13/sync";
-import { googleCredentialsConfigured, resolveTarget, s13WritesEnabled } from "@/server/integrations/s13-target";
+import { diffCells, decideWrite, extractGoogleDocId, groupChangesByPage, pagesNeedingCopy, pagesToCells, reconcile, type CellChange, type CellMap, type SyncMode } from "@/modules/s13/sync";
+import { googleCredentialsConfigured, resolveReader, resolveTarget, s13WritesEnabled } from "@/server/integrations/s13-target";
 import { ApiError } from "@/server/api";
 import { writeAudit, type AdminSupabase } from "@/server/outings/planning";
 import { loadS13Document } from "./index";
@@ -52,12 +52,51 @@ async function insertOutbox(supabase: AdminSupabase, runId: string, documentId: 
   }
 }
 
+type PageDoc = { documentId: string; prepared: boolean };
+
+/** Google Doc of every page for one destination: page 1 is the original, later pages are the copies. */
+async function loadPageDocs(supabase: AdminSupabase, document: DocumentRow, target: "STAGING" | "PRODUCTION") {
+  const docs = new Map<number, PageDoc>();
+  const first = target === "STAGING" ? document.staging_document_id : document.external_document_id;
+  if (first) docs.set(1, { documentId: first, prepared: true });
+  const { data, error } = await supabase.from("s13_document_pages").select("page, google_document_id, prepared_at").eq("document_id", document.id).eq("target", target);
+  if (error) throw new Error(error.message);
+  for (const row of data ?? []) docs.set(row.page as number, { documentId: row.google_document_id as string, prepared: Boolean(row.prepared_at) });
+  return docs;
+}
+
 /**
- * Computes what the Doc would receive (only differences from the last successful sync) and
- * records the attempt. In DRY_RUN — the default — nothing leaves the database. Any write goes
- * through decideWrite(); a blocked run is recorded, never silently skipped.
+ * Creates the Docs for pages that have no Doc yet (each is a copy of the previous page, blanked) and
+ * finishes any copy that was left half-prepared. Returns how many were created.
  */
-export async function runS13Sync(supabase: AdminSupabase, actorId: string, code: string) {
+async function ensurePageDocs(supabase: AdminSupabase, document: DocumentRow, target: "STAGING" | "PRODUCTION", pageCount: number, docs: Map<number, PageDoc>) {
+  const client = resolveTarget(target);
+  let created = 0;
+  for (const page of pagesNeedingCopy(pageCount, docs.keys())) {
+    const source = docs.get(page - 1);
+    if (!source) throw new Error(`No se puede crear la hoja ${page}: falta el documento de la hoja ${page - 1}.`);
+    const copy = await client.copyPage({ sourceDocumentId: source.documentId, name: `${document.title} - hoja ${page}` });
+    const { error } = await supabase.from("s13_document_pages").insert({ document_id: document.id, page, target, google_document_id: copy.documentId });
+    if (error) throw new Error(`Se creó la copia ${copy.documentId} pero no se pudo registrar: ${error.message}`);
+    docs.set(page, { documentId: copy.documentId, prepared: false });
+    created += 1;
+  }
+  for (const [page, doc] of [...docs.entries()].sort((a, b) => a[0] - b[0])) {
+    if (doc.prepared) continue;
+    await client.clearPage({ documentId: doc.documentId, page });
+    await supabase.from("s13_document_pages").update({ prepared_at: new Date().toISOString() }).eq("document_id", document.id).eq("page", page).eq("target", target);
+    doc.prepared = true;
+  }
+  return created;
+}
+
+/**
+ * Computes what the Docs would receive (only differences from the last successful sync) and
+ * records the attempt. In DRY_RUN — the default — nothing leaves the database. Any write goes
+ * through decideWrite(); a blocked run is recorded, never silently skipped. Every S-13 page is its
+ * own Google Doc: when a territory runs out of rounds the previous page's Doc is copied and blanked.
+ */
+export async function runS13Sync(supabase: AdminSupabase, actorId: string | null, code: string) {
   const document = await loadDocument(supabase, code);
   const { pages } = await loadS13Document(supabase, document);
   const desired = pagesToCells(pages);
@@ -67,7 +106,7 @@ export async function runS13Sync(supabase: AdminSupabase, actorId: string, code:
 
   const { data: run, error } = await supabase.from("s13_sync_runs").insert({ document_id: document.id, mode: document.sync_mode, triggered_by: actorId }).select("id").single();
   if (error || !run) throw new Error(error?.message ?? "No se pudo registrar la sincronización.");
-  const summaryBase = { changes: changes.length, unchanged, cells: Object.keys(desired).length };
+  const summaryBase = { changes: changes.length, unchanged, cells: Object.keys(desired).length, pages: pages.length };
   const finish = async (status: "SIMULATED" | "SENT" | "FAILED" | "BLOCKED", extra: Record<string, unknown> = {}, failure: string | null = null) => {
     await supabase.from("s13_sync_runs").update({ status, finished_at: new Date().toISOString(), summary: { ...summaryBase, ...extra }, error: failure }).eq("id", run.id);
     await writeAudit(supabase, { actorId, action: "S13_SYNC_RUN", entityType: "s13_document", entityId: document.id, metadata: { run_id: run.id, mode: document.sync_mode, status, ...summaryBase } });
@@ -85,20 +124,68 @@ export async function runS13Sync(supabase: AdminSupabase, actorId: string, code:
 
   await insertOutbox(supabase, run.id as string, document.id, changes, "PENDING");
   try {
-    const applied = await resolveTarget(decision.target).applyChanges({ documentId: decision.documentId, firstTerritory: document.first_territory, changes });
-    await supabase.from("s13_sync_outbox").update({ status: "SENT" }).eq("run_id", run.id).eq("status", "PENDING");
-    const sets = changes.filter((change) => change.operation === "SET");
-    for (let start = 0; start < sets.length; start += 500) {
-      await supabase.from("s13_sync_snapshots").upsert(sets.slice(start, start + 500).map((change) => ({ document_id: document.id, cell_key: change.key, value: change.value as string, synced_at: new Date().toISOString() })), { onConflict: "document_id,cell_key" });
+    const client = resolveTarget(decision.target);
+    const docs = await loadPageDocs(supabase, document, decision.target);
+    const createdPages = await ensurePageDocs(supabase, document, decision.target, pages.length, docs);
+
+    let applied = 0;
+    for (const [page, pageChanges] of [...groupChangesByPage(changes).entries()].sort((a, b) => a[0] - b[0])) {
+      const doc = docs.get(page);
+      if (!doc) throw new Error(`La hoja ${page} no tiene documento de Google.`);
+      applied += (await client.applyChanges({ documentId: doc.documentId, page, changes: pageChanges })).applied;
+      const sets = pageChanges.filter((change) => change.operation === "SET");
+      for (let start = 0; start < sets.length; start += 500) {
+        await supabase.from("s13_sync_snapshots").upsert(sets.slice(start, start + 500).map((change) => ({ document_id: document.id, cell_key: change.key, value: change.value as string, synced_at: new Date().toISOString() })), { onConflict: "document_id,cell_key" });
+      }
+      const clears = pageChanges.filter((change) => change.operation === "CLEAR").map((change) => change.key);
+      for (let start = 0; start < clears.length; start += 200) await supabase.from("s13_sync_snapshots").delete().eq("document_id", document.id).in("cell_key", clears.slice(start, start + 200));
+      const keys = pageChanges.map((change) => change.key);
+      for (let start = 0; start < keys.length; start += 200) await supabase.from("s13_sync_outbox").update({ status: "SENT" }).eq("run_id", run.id).in("cell_key", keys.slice(start, start + 200));
     }
-    for (const change of changes.filter((entry) => entry.operation === "CLEAR")) await supabase.from("s13_sync_snapshots").delete().eq("document_id", document.id).eq("cell_key", change.key);
     await supabase.from("s13_documents").update({ last_synced_at: new Date().toISOString() }).eq("id", document.id);
-    return finish("SENT", { applied: applied.applied, target: decision.target });
+    return finish("SENT", { applied, target: decision.target, pages_created: createdPages });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "Error inesperado.";
     await supabase.from("s13_sync_outbox").update({ status: "FAILED", last_error: message }).eq("run_id", run.id).eq("status", "PENDING");
     return finish("FAILED", {}, message);
   }
+}
+
+/**
+ * Read-only check of the Docs against the database (safe on the real documents: nothing is written).
+ * Lists the cells where they disagree so a staging copy can be verified before going to production.
+ */
+export async function compareWithDocuments(supabase: AdminSupabase, code: string) {
+  const document = await loadDocument(supabase, code);
+  if (!googleCredentialsConfigured()) throw new ApiError("Faltan las credenciales de Google para leer los documentos.", 409);
+  const target = document.sync_mode === "STAGING" ? "STAGING" : "PRODUCTION";
+  const docs = await loadPageDocs(supabase, document, target);
+  if (!docs.size) throw new ApiError(target === "STAGING" ? "Falta el link de la copia de prueba." : "Falta el link del documento real.", 409);
+  const { pages } = await loadS13Document(supabase, document);
+  const desired = pagesToCells(pages);
+  const reader = resolveReader();
+  const mismatches: ReturnType<typeof reconcile> = [];
+  for (const [page, doc] of [...docs.entries()].sort((a, b) => a[0] - b[0])) {
+    const expected = Object.fromEntries(Object.entries(desired).filter(([key]) => key.startsWith(`p${page}/`)));
+    mismatches.push(...reconcile(expected, await reader.readCells({ documentId: doc.documentId, page })));
+  }
+  return { target, pages_compared: docs.size, database_pages: pages.length, total: mismatches.length, mismatches: mismatches.slice(0, 100) };
+}
+
+/** Cron entry point: keeps every document that is past simulation up to date. Errors never stop the others. */
+export async function runScheduledS13Sync(supabase: AdminSupabase) {
+  const { data, error } = await supabase.from("s13_documents").select("code").neq("sync_mode", "DRY_RUN");
+  if (error) throw new Error(error.message);
+  let synced = 0;
+  for (const row of data ?? []) {
+    try {
+      const result = await runS13Sync(supabase, null, row.code as string);
+      if (result.status === "SENT") synced += 1;
+    } catch (cause) {
+      console.error(`Falló la sincronización programada del S-13 ${row.code}:`, cause);
+    }
+  }
+  return synced;
 }
 
 export type ConfigureInput = { code: string; sync_mode: SyncMode; staging_document: string | null; external_document: string | null; staging_verified: boolean };
@@ -117,6 +204,10 @@ export async function configureSync(supabase: AdminSupabase, actorId: string, in
   const patch = { sync_mode: input.sync_mode, staging_document_id: stagingId, external_document_id: externalId, staging_verified_at: input.staging_verified && stagingId ? document.staging_verified_at ?? new Date().toISOString() : null, updated_at: new Date().toISOString() };
   const { error } = await supabase.from("s13_documents").update(patch).eq("id", document.id);
   if (error) throw new Error(error.message);
+  // The snapshot describes what ONE destination already holds: a new destination starts from scratch.
+  if (input.sync_mode !== document.sync_mode || stagingId !== document.staging_document_id || externalId !== document.external_document_id) {
+    await supabase.from("s13_sync_snapshots").delete().eq("document_id", document.id);
+  }
   await writeAudit(supabase, { actorId, action: "S13_SYNC_CONFIGURED", entityType: "s13_document", entityId: document.id, before: { mode: document.sync_mode, staging: document.staging_document_id, external: document.external_document_id }, after: { mode: patch.sync_mode, staging: stagingId, external: externalId, verified: Boolean(patch.staging_verified_at) } });
   return {};
 }

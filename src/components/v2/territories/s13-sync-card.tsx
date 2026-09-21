@@ -20,6 +20,8 @@ export type SyncInfo = {
 
 type RunResult = { status: string; mode: string; changes: number; unchanged: number; cells: number; reason: string | null; sample: { key: string; operation: string; value: string | null }[] };
 
+type CompareResult = { target: string; pages_compared: number; database_pages: number; total: number; mismatches: { key: string; database: string | null; document: string | null }[] };
+
 async function post(action: string, payload: Record<string, unknown>) {
   const response = await fetch("/api/v2/s13", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload }) });
   const body = await response.json().catch(() => ({}));
@@ -42,6 +44,7 @@ export function S13SyncCard({ code, sync, onChanged }: { code: string; sync: Syn
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<RunResult | null>(null);
+  const [comparison, setComparison] = useState<CompareResult | null>(null);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -70,6 +73,7 @@ export function S13SyncCard({ code, sync, onChanged }: { code: string; sync: Syn
 
       <div className="flex flex-wrap items-center gap-3">
         <button className={primarySmallButtonClass} disabled={busy} onClick={() => void run(async () => { setResult((await post("sync", { code })) as RunResult); onChanged(); })} type="button">{sync.mode === "DRY_RUN" ? "Simular sincronización" : "Sincronizar"}</button>
+        <button className={miniButtonClass} disabled={busy || !sync.credentials_configured} onClick={() => void run(async () => { setComparison((await post("compare", { code })) as CompareResult); })} title="Solo lee el documento: no escribe nada." type="button">Comparar con el documento</button>
         <span className="text-xs text-muted">Credenciales de Google: {sync.credentials_configured ? "configuradas" : "sin configurar"} · Escritura: {sync.writes_enabled ? "habilitada" : "deshabilitada"}{sync.last_synced_at ? ` · última sincronización ${new Date(sync.last_synced_at).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}` : ""}</span>
       </div>
 
@@ -78,6 +82,16 @@ export function S13SyncCard({ code, sync, onChanged }: { code: string; sync: Syn
           {result.status === "SIMULATED" ? "Simulación lista: " : result.status === "SENT" ? "Enviado: " : result.status === "BLOCKED" ? "Bloqueado: " : "Falló: "}
           {result.changes} celda{result.changes === 1 ? "" : "s"} cambiar{result.changes === 1 ? "ía" : "ían"}, {result.unchanged} sin cambios{result.reason ? ` · ${result.reason}` : ""}.
         </Notice>
+      ) : null}
+      {comparison ? (
+        <Notice tone={comparison.total ? "warning" : "success"}>
+          {comparison.total ? `${comparison.total} celda${comparison.total === 1 ? "" : "s"} distinta${comparison.total === 1 ? "" : "s"} entre la base y el documento` : "El documento coincide con la base de datos"} ({comparison.pages_compared} hoja{comparison.pages_compared === 1 ? "" : "s"} leída{comparison.pages_compared === 1 ? "" : "s"}; la base necesita {comparison.database_pages}).
+        </Notice>
+      ) : null}
+      {comparison?.mismatches.length ? (
+        <ul className="max-h-48 overflow-y-auto rounded-lg bg-black/20 p-2 font-mono text-xs text-foreground/90">
+          {comparison.mismatches.map((entry) => <li key={entry.key}>{entry.key}: base = {entry.database ?? "(vacío)"} · documento = {entry.document ?? "(vacío)"}</li>)}
+        </ul>
       ) : null}
       {result?.sample.length ? (
         <ul className="max-h-48 overflow-y-auto rounded-lg bg-black/20 p-2 font-mono text-xs text-foreground/90">

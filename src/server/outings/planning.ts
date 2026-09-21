@@ -67,7 +67,7 @@ export async function resolveReviewerIds(supabase: AdminSupabase) {
 }
 
 export type AuditEntry = {
-  actorId: string;
+  actorId: string | null;
   action: string;
   entityType: string;
   entityId: string | null;
