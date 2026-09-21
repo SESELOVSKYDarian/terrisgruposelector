@@ -20,6 +20,7 @@
     "src/modules/territories/do-not-visit.ts",
     "src/modules/s13/layout.ts",
     "src/modules/map/geometry.ts",
+    "src/modules/telephone/assignment.ts",
     "src/server/events/processor.ts",
     "src/server/scheduler/reminders.ts"
   ]

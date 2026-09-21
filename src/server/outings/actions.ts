@@ -27,6 +27,7 @@ import {
   type WeekRow,
 } from "./planning";
 import { materializeTemplate } from "./recurring";
+import { assignPhoneNumbers, zoomAnnouncementDraft } from "@/server/telephone";
 
 /** Every action that mutates the weekly plan. They all go through planning authority, not legacy ADMIN. */
 export const OUTING_ACTIONS = new Set([
@@ -37,6 +38,8 @@ export const OUTING_ACTIONS = new Set([
   "deleteWeeklyOutingSlot",
   "setSlotTerritories",
   "setSlotStatus",
+  "setSlotZoom",
+  "switchSlotToZoom",
   "autoFillWeeklyOuting",
   "submitWeeklyOuting",
   "returnWeeklyOutingToDraft",
@@ -266,6 +269,36 @@ export async function handleOutingAction(action: string, payload: Payload, profi
     const now = new Date().toISOString();
     const before = slotSnapshot(slot);
     const published = week.status === "PUBLISHED";
+
+    if (action === "setSlotZoom" || action === "switchSlotToZoom") {
+      const zoom = action === "switchSlotToZoom" ? true : Boolean(payload?.zoom);
+      // Rain: only the Superintendente de Servicio may turn an already published outing into a Zoom one.
+      if (published && !authority.canPublish) return forbidden("Cambiar una salida publicada a Zoom corresponde al Superintendente de Servicio.");
+      const { data: current } = await supabase.from("weekly_outing_slots").select("is_zoom, lugar").eq("id", slot.id).single();
+      if (Boolean(current?.is_zoom) === zoom) return ok({ zoom, unchanged: true });
+
+      if (zoom) {
+        const { data: primary } = await supabase.from("weekly_outing_slot_territories").select("territory_id").eq("slot_id", slot.id).order("sort_order").limit(1).maybeSingle();
+        if (!primary) return fail("Asigná un territorio a la salida antes de pasarla a Zoom.", 422);
+        const { error } = await supabase.from("weekly_outing_slots").update({ is_zoom: true, lugar: "Zoom", updated_at: now }).eq("id", slot.id);
+        if (error) return fail(migrationHint(error.message));
+        const assignment = await assignPhoneNumbers(supabase, { slotId: slot.id, primaryTerritoryId: primary.territory_id as string, actorId: profile.id });
+        await writeAudit(supabase, { actorId: profile.id, action: "SLOT_SWITCHED_TO_ZOOM", entityType: "weekly_outing_slot", entityId: slot.id, metadata: { weekly_outing_id: week.id, slot_date: slot.slot_date, week_status: week.status, rain: action === "switchSlotToZoom" }, before: { lugar: slot.lugar, is_zoom: false }, after: { lugar: "Zoom", is_zoom: true, territories: assignment.territory_ids.length, numbers: assignment.total } });
+        if (published) await notifyPublishedSlotChange(ctx, week, { slot, kind: "updated", changed: ["lugar"], conductorAfter: slot.conductor_id, stamp: now, detail: "La salida se realizará por Zoom." });
+        return ok({ zoom: true, numbers: assignment.total, territories: assignment.territory_ids.length, announcement: published ? zoomAnnouncementDraft(slot.slot_date, slot.hora) : null });
+      }
+
+      const { count } = await supabase.from("telephone_call_results").select("id", { count: "exact", head: true }).eq("slot_id", slot.id);
+      if (count) return fail("Ya hay resultados telefónicos registrados: no se puede quitar Zoom.", 409);
+      const cleared = await supabase.from("telephone_assignments").delete().eq("slot_id", slot.id);
+      if (cleared.error) return fail(cleared.error.message);
+      const restoredLugar = current?.lugar === "Zoom" ? null : current?.lugar ?? null;
+      const { error } = await supabase.from("weekly_outing_slots").update({ is_zoom: false, lugar: restoredLugar, updated_at: now }).eq("id", slot.id);
+      if (error) return fail(migrationHint(error.message));
+      await writeAudit(supabase, { actorId: profile.id, action: "SLOT_ZOOM_REMOVED", entityType: "weekly_outing_slot", entityId: slot.id, metadata: { weekly_outing_id: week.id, slot_date: slot.slot_date, week_status: week.status }, before: { lugar: current?.lugar, is_zoom: true }, after: { lugar: restoredLugar, is_zoom: false } });
+      if (published) await notifyPublishedSlotChange(ctx, week, { slot, kind: "updated", changed: ["lugar"], conductorAfter: slot.conductor_id, stamp: now, detail: "La salida volvió a ser presencial." });
+      return ok({ zoom: false });
+    }
 
     if (action === "updateWeeklyOutingSlot") {
       const patch: Record<string, unknown> = { updated_at: now };

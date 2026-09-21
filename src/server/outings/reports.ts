@@ -10,6 +10,7 @@ import { ApiError, forbid } from "@/server/api";
 import { initialDriverReportDeadline } from "@/server/scheduler/reminders";
 import { recomputeRound, territoryLabels } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
+import { loadPhoneBlocks } from "@/server/telephone";
 import { loadWeek, resolvePlannerIds, safeEmit, writeAudit, type AdminSupabase } from "./planning";
 
 export type ReportCtx = { supabase: AdminSupabase; profile: SessionProfile; authority: PlanningAuthority };
@@ -34,10 +35,10 @@ export async function territoryFormState(supabase: AdminSupabase, territoryId: s
   return { labels, prior_done: prior, do_not_visit: warnings.map((item) => item.address) };
 }
 
-const SLOT_SELECT = "id,weekly_outing_id,slot_date,hora,lugar,starts_at,status,group_id,conductor_id,weekly_outings!inner(status),weekly_outing_slot_territories(territory_id,sort_order,territories(number,name))";
+const SLOT_SELECT = "id,weekly_outing_id,slot_date,hora,lugar,starts_at,status,group_id,conductor_id,is_zoom,weekly_outings!inner(status),weekly_outing_slot_territories(territory_id,sort_order,territories(number,name))";
 
 type SlotRecord = {
-  id: string; weekly_outing_id: string; slot_date: string; hora: string | null; lugar: string | null; starts_at: string | null; status: string | null; group_id: string | null; conductor_id: string | null;
+  id: string; weekly_outing_id: string; slot_date: string; hora: string | null; lugar: string | null; starts_at: string | null; status: string | null; group_id: string | null; conductor_id: string | null; is_zoom: boolean | null;
   weekly_outings: { status: string | null } | { status: string | null }[] | null;
   weekly_outing_slot_territories: { territory_id: string; sort_order: number; territories: { number: string | number; name: string | null } | { number: string | number; name: string | null }[] | null }[];
 };
@@ -103,6 +104,7 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
   for (const visit of (roundVisits ?? []) as VisitRow[]) visitsByRound.set(visit.territory_round_id, [...(visitsByRound.get(visit.territory_round_id) ?? []), visit]);
   const warningRows = await activeDoNotVisit(supabase, territoryIds);
   const warningsOf = (territoryId: string) => warningRows.filter((row) => row.territory_id === territoryId).map((row) => row.address);
+  const phoneBlocks = await loadPhoneBlocks(supabase, slots.filter((slot) => slot.is_zoom).map((slot) => slot.id));
   const openRoundByTerritory = new Map((openRounds ?? []).map((round) => [round.territory_id as string, round.id as string]));
 
   const profileIds = [...new Set([...slots.map((slot) => slot.conductor_id), ...(reports ?? []).map((report) => report.submitted_by as string | null)].filter((id): id is string => Boolean(id)))];
@@ -156,6 +158,8 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
       lugar: slot.lugar,
       status: slot.status ?? "PROGRAMADA",
       group_id: slot.group_id,
+      is_zoom: Boolean(slot.is_zoom),
+      phone: phoneBlocks.get(slot.id) ?? null,
       conductor_id: slot.conductor_id,
       conductor_name: nameOf(slot.conductor_id),
       mine: slot.conductor_id === profile.id,
@@ -180,12 +184,14 @@ async function allTerritories(supabase: AdminSupabase) {
 /** Creates or edits the outing report and rebuilds every affected round (S-13 rules). */
 export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
   const { supabase, profile, authority } = ctx;
-  const { data: slot, error: slotError } = await supabase.from("weekly_outing_slots").select("id, weekly_outing_id, slot_date, conductor_id, status, weekly_outing_slot_territories(territory_id)").eq("id", input.slot_id).maybeSingle();
+  const { data: slot, error: slotError } = await supabase.from("weekly_outing_slots").select("id, weekly_outing_id, slot_date, conductor_id, status, is_zoom, weekly_outing_slot_territories(territory_id)").eq("id", input.slot_id).maybeSingle();
   if (slotError) throw new Error(slotError.message);
   if (!slot) throw new ApiError("Salida no encontrada.", 404);
   const week = await loadWeek(supabase, slot.weekly_outing_id as string);
   if (!week || week.status !== "PUBLISHED") throw new ApiError("La salida todavía no está publicada.", 409);
   if (slot.status === "CANCELADA") throw new ApiError("La salida fue cancelada.", 409);
+  // S-13 is house-to-house only: a Zoom outing reports call results instead of blocks.
+  if (slot.is_zoom) throw new ApiError("Las salidas por Zoom se informan con los resultados telefónicos.", 409);
   if (!slot.conductor_id) throw new ApiError("La salida no tiene conductor asignado.", 422);
   const onBehalf = slot.conductor_id !== profile.id;
   if (onBehalf && !isPlanner(authority)) forbid("Solo el conductor de la salida puede cargar su informe.");

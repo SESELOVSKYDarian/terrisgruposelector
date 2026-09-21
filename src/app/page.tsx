@@ -35,6 +35,7 @@ import {
   Undo2,
   User,
   Users,
+  Video,
   Wand2,
   X,
 } from "lucide-react";
@@ -76,6 +77,8 @@ import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
 import { S13View } from "@/components/v2/territories/s13-view";
 import { MapView } from "@/components/v2/territories/map-view";
 import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
+import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
+import { saveAnnouncementDraft } from "@/components/v2/announcement-draft";
 import { warningsForTerritories, type DoNotVisitItem } from "@/modules/territories/do-not-visit";
 
 type Group = { id: string; name: string; active: boolean };
@@ -189,6 +192,7 @@ type WeeklyOutingSlot = {
   note: string | null;
   status?: SlotStatus;
   group_id?: string | null;
+  is_zoom?: boolean;
   time_parse_status?: "PARSED" | "EMPTY" | "UNPARSEABLE" | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
   weekly_outing_slot_territories: WeeklyOutingSlotTerritory[];
@@ -852,12 +856,12 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "dnv" as const, label: "No visitar" }];
-  const [tab, setTab] = useState<"list" | "map" | "s13" | "dnv">(tabs[0].id);
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "phone" as const, label: "Telefónico" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "map" | "s13" | "phone" | "dnv">(tabs[0].id);
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : <S13View />}
     </div>
   );
 }
@@ -2943,6 +2947,16 @@ function WeeklyOutingSlotCard({
     : undefined;
   const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
   const cancelled = slot.status === "CANCELADA";
+  const weekStatus = data.weeklyOutings.find((week) => week.id === slot.weekly_outing_id)?.status ?? "PUBLISHED";
+  // Turning a published outing into Zoom (rain) is the Superintendente de Servicio's call.
+  const zoomAllowed = weekStatus !== "PUBLISHED" || data.planningAccess.canPublish;
+  async function toggleZoom() {
+    const rain = weekStatus === "PUBLISHED" && !slot.is_zoom;
+    const result = await mutate(rain ? "switchSlotToZoom" : "setSlotZoom", { id: slot.id, zoom: !slot.is_zoom });
+    const announcement = result && typeof result === "object" && "announcement" in result ? (result as { announcement?: { title: string; description: string } | null }).announcement : null;
+    // The rain flow ends in an announcement: leave the draft ready for the composer.
+    if (announcement) saveAnnouncementDraft(announcement);
+  }
 
   return (
     <div className={cn("rounded-2xl p-3 transition", highlighted ? "bg-primary/[0.09]" : "bg-black/15", cancelled && "opacity-60")} inert={readOnly}>
@@ -2962,6 +2976,11 @@ function WeeklyOutingSlotCard({
           >
             <Star fill={highlighted ? "currentColor" : "none"} size={15} aria-hidden="true" />
           </button>
+          {zoomAllowed ? (
+            <button aria-label={slot.is_zoom ? "Quitar Zoom" : "Pasar a Zoom"} className={cn("inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition", slot.is_zoom ? "text-sky-300" : "text-slate-600 hover:text-sky-300")} onClick={() => void toggleZoom()} title={slot.is_zoom ? "Quitar Zoom" : "Pasar a Zoom (asigna teléfonos)"} type="button">
+              <Video size={14} aria-hidden="true" />
+            </button>
+          ) : null}
           <button
             aria-label={cancelled ? "Reactivar salida" : "Cancelar salida"}
             className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-600 transition hover:text-amber-300"
@@ -2981,6 +3000,7 @@ function WeeklyOutingSlotCard({
         <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-300"><TriangleAlert size={12} aria-hidden="true" />Hora sin interpretar: &ldquo;{slot.hora}&rdquo;. Elegí una hora para corregirla.</p>
       ) : null}
       {cancelled ? <p className="mt-1.5 text-xs font-medium text-rose-300">Salida cancelada</p> : null}
+      {slot.is_zoom ? <p className="mt-1.5 text-xs font-medium text-sky-300">Salida por Zoom · se asigna un listado de teléfonos</p> : null}
       {slot.group_id ? <p className="mt-1.5 text-xs font-medium text-primary">Salida por grupo: {data.groups.find((group) => group.id === slot.group_id)?.name ?? "Grupo"}</p> : null}
 
       <div className="mt-2 flex items-center gap-2">

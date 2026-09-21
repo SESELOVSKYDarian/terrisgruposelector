@@ -8,13 +8,14 @@ import { formatDateEs } from "@/modules/outings/time";
 import { cn } from "@/lib/utils";
 import { useHighlight } from "../highlight";
 import { DoNotVisitWarning } from "../do-not-visit";
+import { PhoneResults, type PhoneBlock } from "../telephone/phone-results";
 import { Card, Empty, Notice, Pill, SubTabs, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 
 type Territory = { territory_id: string; number: string | number; name: string | null; labels: string[]; prior_done: string[]; do_not_visit?: string[] };
 type Entry = Territory & { done_labels: string[]; planned: boolean; round_closed?: boolean };
 type Report = { id: string; notes: string | null; submitted_by_name: string | null; on_behalf: boolean; entries: (Entry & { pending_labels: string[] })[] };
-type Slot = { id: string; slot_date: string; hora: string | null; lugar: string | null; status: string; conductor_name: string | null; mine: boolean; overdue: boolean; territories: Territory[]; report: Report | null };
+type Slot = { id: string; slot_date: string; hora: string | null; lugar: string | null; status: string; conductor_name: string | null; mine: boolean; overdue: boolean; is_zoom: boolean; phone: PhoneBlock | null; territories: Territory[]; report: Report | null };
 type State = { me: string; canReportForOthers: boolean; slots: Slot[]; territories: { id: string; number: string | number; name: string | null }[] };
 
 const dayNames = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
@@ -116,6 +117,7 @@ function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (
           {!slot.mine && slot.conductor_name ? <p className="text-xs text-muted">Conductor: {slot.conductor_name}</p> : null}
         </div>
         <div className="flex items-center gap-2">
+          {slot.is_zoom ? <Pill tone="sky">Zoom</Pill> : null}
           {cancelled ? <Pill tone="rose">Cancelada</Pill> : slot.report ? <Pill tone="emerald"><CheckCircle2 className="mr-1" size={12} aria-hidden="true" />Informe enviado</Pill> : slot.overdue ? <Pill tone="amber"><TriangleAlert className="mr-1" size={12} aria-hidden="true" />Informe pendiente</Pill> : <Pill tone="sky">Programada</Pill>}
         </div>
       </div>
@@ -123,9 +125,11 @@ function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (
       <p className="mt-2 text-sm text-foreground/90">{slot.territories.length ? slot.territories.map((territory) => `Territorio ${territory.number}`).join(" + ") : "Sin territorios asignados"}</p>
       {slot.report ? <p className="mt-1 text-xs text-muted" data-entity-id={slot.report.id}>{slot.report.on_behalf ? `Cargado por ${slot.report.submitted_by_name ?? "otra persona"}` : "Cargado por el conductor"}{slot.report.entries.length ? ` · ${slot.report.entries.map((entry) => `T${entry.number}: ${entry.done_labels.length} manzana${entry.done_labels.length === 1 ? "" : "s"}`).join(", ")}` : ""}</p> : null}
       {!cancelled && !open ? (
-        <button className={cn(miniButtonClass, "mt-3")} onClick={() => setOpen(true)} type="button">{slot.report ? "Editar informe" : "Completar"}</button>
+        <button className={cn(miniButtonClass, "mt-3")} onClick={() => setOpen(true)} type="button">{slot.is_zoom ? (slot.phone?.done === slot.phone?.total && slot.phone?.total ? "Ver resultados" : "Cargar resultados") : slot.report ? "Editar informe" : "Completar"}</button>
       ) : null}
-      {open ? <ReportForm busy={busy} onCancel={() => setOpen(false)} run={run} slot={slot} state={state} /> : null}
+      {open ? (
+        slot.is_zoom && slot.phone ? <PhoneResults busy={busy} phone={slot.phone} run={run} slotDate={slot.slot_date} slotId={slot.id} /> : <ReportForm busy={busy} onCancel={() => setOpen(false)} run={run} slot={slot} state={state} />
+      ) : null}
     </article>
   );
 }
