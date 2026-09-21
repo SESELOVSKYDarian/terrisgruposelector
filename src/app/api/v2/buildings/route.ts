@@ -5,6 +5,8 @@ import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/ap
 import { canAccessTerritory, getBuildingAccess } from "@/server/buildings/access";
 import { createBuilding, decideProposal, listBuildings, loadBuilding, proposeBuilding, saveStructure } from "@/server/buildings";
 import { writeAudit } from "@/server/outings/planning";
+import { applyCensusCorrection, censusPhoto, dismissCensus, listPendingCensus, reportMissingCensus } from "@/server/buildings/census";
+import { censusReasons } from "@/modules/buildings/structure";
 
 export const runtime = "nodejs";
 
@@ -16,6 +18,9 @@ const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("propose"), payload: z.object({ territory_id: z.string().uuid(), address }) }),
   z.object({ action: z.literal("decideProposal"), payload: z.object({ id: z.string().uuid(), approve: z.boolean(), note: z.string().max(400).nullable().optional() }) }),
   z.object({ action: z.literal("saveStructure"), payload: z.object({ building_id: z.string().uuid(), expected_version: z.number().int().min(1), units: z.array(unit).max(300) }) }),
+  z.object({ action: z.literal("reportCensus"), payload: z.object({ building_id: z.string().uuid(), base_version: z.number().int().min(1), reason: z.enum(censusReasons), description: z.string().max(1500).nullable().optional(), photo_data: z.string().max(900000).nullable().optional(), diff: z.array(z.unknown()).max(50).nullable().optional() }) }),
+  z.object({ action: z.literal("applyCorrection"), payload: z.object({ id: z.string().uuid() }) }),
+  z.object({ action: z.literal("dismissCensus"), payload: z.object({ id: z.string().uuid(), note: z.string().max(400).nullable().optional() }) }),
   z.object({ action: z.literal("setStatus"), payload: z.object({ building_id: z.string().uuid(), active: z.boolean() }) }),
 ]);
 
@@ -34,15 +39,23 @@ export async function GET(request: NextRequest) {
       return { canManage: access.canManage, building };
     }
 
+    const photoId = params.get("censusPhoto");
+    if (photoId) {
+      if (!access.canManage) forbid("Solo Servicio o Territorios ven las fotos de los informes.");
+      if (!z.string().uuid().safeParse(photoId).success) throw new ApiError("Informe inválido.", 422);
+      return { photo: await censusPhoto(supabase, photoId) };
+    }
+
     const territoryId = params.get("territory") ?? undefined;
     if (territoryId && !z.string().uuid().safeParse(territoryId).success) throw new ApiError("Territorio inválido.", 422);
     if (territoryId && !canAccessTerritory(access, territoryId)) forbid("No tenés acceso a los edificios de ese territorio.");
 
-    const [buildings, proposals, territories] = await Promise.all([
+    const [buildings, proposals, census, territories] = await Promise.all([
       listBuildings(supabase, { territoryIds: access.territoryIds, territoryId, q: params.get("q") ?? undefined }),
       access.canManage
         ? supabase.from("building_proposals").select("id, territory_id, address, created_at, profiles!proposed_by(full_name), territories(number)").eq("status", "PENDING").order("created_at")
         : Promise.resolve({ data: [], error: null }),
+      access.canManage ? listPendingCensus(supabase) : Promise.resolve([]),
       // Territories the caller can attach a building/proposal to.
       (async () => {
         const query = supabase.from("territories").select("id, number, name").eq("active", true).order("number");
@@ -54,6 +67,7 @@ export async function GET(request: NextRequest) {
     return {
       canManage: access.canManage,
       buildings,
+      census,
       territories: territories.data ?? [],
       proposals: (proposals.data ?? []).map((row) => {
         const author = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
@@ -76,7 +90,11 @@ export async function POST(request: Request) {
       return proposeBuilding(supabase, profile, payload);
     }
 
+    if (action === "reportCensus") return reportMissingCensus(supabase, profile, access, payload);
+
     if (!access.canManage) forbid("Solo Superintendente de Servicio o Siervo de Territorios administran los edificios.");
+    if (action === "applyCorrection") return applyCensusCorrection(supabase, profile, payload.id);
+    if (action === "dismissCensus") return dismissCensus(supabase, profile, payload);
     if (action === "create") return { id: await createBuilding(supabase, { ...payload, actorId: profile.id }) };
     if (action === "decideProposal") return decideProposal(supabase, profile, payload);
     if (action === "saveStructure") return saveStructure(supabase, profile.id, payload);

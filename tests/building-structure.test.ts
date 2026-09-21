@@ -64,3 +64,17 @@ test("un timbre nuevo sin posición ocupa la primera celda libre", () => {
   assert.deepEqual(nextFreeCell(units), { row: 1, col: 1 });
   assert.deepEqual(nextFreeCell([]), { row: 0, col: 0 });
 });
+
+import { describeDiff, parseDiffOps } from "../src/modules/buildings/structure";
+
+test("la propuesta estructurada se valida antes de guardarse", () => {
+  const ok = parseDiffOps([{ op: "ADD", label: " A3 " }, { op: "RENAME", from: "2B", to: "2C" }, { op: "MOVE", label: "B1", row: 1, col: 0 }, { op: "REMOVE", label: "4" }]);
+  assert.ok(ok.ok);
+  if (ok.ok) assert.equal(describeDiff(ok.ops), "ADD A3 · RENAME 2B → 2C · MOVE B1 → fila 2, col 1 · REMOVE 4");
+  assert.equal(parseDiffOps("no").ok, false);
+  assert.equal(parseDiffOps([{ op: "ADD" }]).ok, false);
+  assert.equal(parseDiffOps([{ op: "ADD", label: "A3", row: 1 }]).ok, false);
+  assert.equal(parseDiffOps([{ op: "MOVE", label: "A1", row: -1, col: 0 }]).ok, false);
+  assert.equal(parseDiffOps([{ op: "BORRAR", label: "A1" }]).ok, false);
+  assert.equal(parseDiffOps(Array.from({ length: 51 }, () => ({ op: "REMOVE", label: "A1" }))).ok, false);
+});

@@ -9,10 +9,11 @@ import { useHighlight } from "../highlight";
 import { Card, Empty, Notice, Pill, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 import { BuildingDetail, type BuildingData } from "./building-detail";
+import { CensusInbox, type CensusRow } from "./census-inbox";
 
 type Item = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number };
 type Proposal = { id: string; territory_id: string; territory_number: number; address: string; author: string | null };
-type State = { canManage: boolean; buildings: Item[]; territories: { id: string; number: number; name: string | null }[]; proposals: Proposal[] };
+type State = { canManage: boolean; buildings: Item[]; census: CensusRow[]; territories: { id: string; number: number; name: string | null }[]; proposals: Proposal[] };
 
 /**
  * Buildings of a territory (or of all of them for managers). Everyone who can consult the
@@ -22,6 +23,7 @@ export function BuildingsBrowser({ territoryId, detailExtras }: { territoryId?: 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(territoryId ?? "");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [evidence, setEvidence] = useState<CensusRow | null>(null);
   const [newTerritory, setNewTerritory] = useState(territoryId ?? "");
   const [newAddress, setNewAddress] = useState("");
   const [notice, setNotice] = useState("");
@@ -29,7 +31,7 @@ export function BuildingsBrowser({ territoryId, detailExtras }: { territoryId?: 
   const { data, error, loading, busy, run, reload } = useModuleApi<State>(path);
   useHighlight(Boolean(data));
 
-  if (openId) return <BuildingDetail buildingId={openId} onBack={() => { setOpenId(null); void reload(); }} renderUnit={detailExtras} />;
+  if (openId) return <BuildingDetail buildingId={openId} evidence={evidence} onBack={() => { setOpenId(null); setEvidence(null); void reload(); }} renderUnit={detailExtras} startEditing={Boolean(evidence)} />;
   if (loading && !data) return <Notice>Cargando edificios…</Notice>;
   if (!data) return <Notice tone="error">{error || "No se pudieron cargar los edificios."}</Notice>;
 
@@ -50,6 +52,8 @@ export function BuildingsBrowser({ territoryId, detailExtras }: { territoryId?: 
         <input aria-label="Buscar edificio" className={cn(fieldClass, "min-w-56 flex-1")} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por dirección (ej. Paso 123)" type="search" value={query} />
         {!territoryId ? <div className="w-52"><Select onChange={setFilter} options={[{ value: "", label: "Todos los territorios" }, ...data.territories.map((entry) => ({ value: entry.id, label: `Territorio ${entry.number}` }))]} size="compact" value={filter} /></div> : null}
       </div>
+
+      <CensusInbox busy={busy} items={data.census} onOpenEditor={(row) => { setEvidence(row); setOpenId(row.building_id); }} run={run} />
 
       {data.proposals.length ? (
         <Card title="Propuestas pendientes" description="Solo lo aprobado pasa a ser un edificio oficial.">

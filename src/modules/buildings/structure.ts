@@ -105,3 +105,60 @@ export function applyDiff(current: Unit[], ops: DiffOp[]): StructureResult {
   }
   return validateUnits(units);
 }
+
+export const censusReasons = ["FALTAN_TIMBRES", "ORDEN_INCORRECTO", "CAMBIO_NUMERACION", "OTRO"] as const;
+export type CensusReason = (typeof censusReasons)[number];
+
+export const censusReasonLabels: Record<CensusReason, string> = {
+  FALTAN_TIMBRES: "Faltan timbres",
+  ORDEN_INCORRECTO: "Orden incorrecto",
+  CAMBIO_NUMERACION: "Cambió la numeración",
+  OTRO: "Otro",
+};
+
+export const MAX_DIFF_OPS = 50;
+
+/** Validates a structured proposal coming from the client before it is stored. */
+export function parseDiffOps(input: unknown): { ok: true; ops: DiffOp[] } | { ok: false; error: string } {
+  if (!Array.isArray(input)) return { ok: false, error: "La propuesta debe ser una lista de cambios." };
+  if (input.length > MAX_DIFF_OPS) return { ok: false, error: `La propuesta admite hasta ${MAX_DIFF_OPS} cambios.` };
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? normalizeLabel(value) : null);
+  const int = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_GRID ? value : null);
+  const ops: DiffOp[] = [];
+  for (const raw of input as Record<string, unknown>[]) {
+    if (!raw || typeof raw !== "object") return { ok: false, error: "Cambio inválido." };
+    if (raw.op === "ADD") {
+      const label = text(raw.label);
+      if (!label) return { ok: false, error: "ADD necesita un nombre." };
+      const row = raw.row === undefined ? undefined : int(raw.row);
+      const col = raw.col === undefined ? undefined : int(raw.col);
+      if (row === null || col === null || (row === undefined) !== (col === undefined)) return { ok: false, error: "Posición inválida en ADD." };
+      ops.push(row === undefined || col === undefined ? { op: "ADD", label } : { op: "ADD", label, row, col });
+    } else if (raw.op === "REMOVE") {
+      const label = text(raw.label);
+      if (!label) return { ok: false, error: "REMOVE necesita un nombre." };
+      ops.push({ op: "REMOVE", label });
+    } else if (raw.op === "RENAME") {
+      const from = text(raw.from);
+      const to = text(raw.to);
+      if (!from || !to) return { ok: false, error: "RENAME necesita el nombre actual y el nuevo." };
+      ops.push({ op: "RENAME", from, to });
+    } else if (raw.op === "MOVE") {
+      const label = text(raw.label);
+      const row = int(raw.row);
+      const col = int(raw.col);
+      if (!label || row === null || col === null) return { ok: false, error: "MOVE necesita nombre y posición." };
+      ops.push({ op: "MOVE", label, row, col });
+    } else {
+      return { ok: false, error: "Tipo de cambio desconocido." };
+    }
+  }
+  return { ok: true, ops };
+}
+
+/** Human summary of a proposal, e.g. "ADD A3 · RENAME 2B → 2C". */
+export function describeDiff(ops: DiffOp[]) {
+  return ops
+    .map((op) => (op.op === "ADD" ? `ADD ${op.label}` : op.op === "REMOVE" ? `REMOVE ${op.label}` : op.op === "RENAME" ? `RENAME ${op.from} → ${op.to}` : `MOVE ${op.label} → fila ${op.row + 1}, col ${op.col + 1}`))
+    .join(" · ");
+}

@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Pencil, Plus, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Pencil, Plus, X } from "lucide-react";
 import { miniButtonClass, primarySmallButtonClass, secondaryButtonClass } from "@/app/_components/ui-classes";
 import { gridSize, normalizeLabel, type Unit } from "@/modules/buildings/structure";
 import { cn } from "@/lib/utils";
 import { Card, Notice, Pill, fieldClass } from "../ui";
+import { CensusReportForm } from "./census-report-form";
+import type { CensusRow } from "./census-inbox";
+import { describeDiff } from "@/modules/buildings/structure";
 import { useModuleApi } from "../use-module-api";
 
 export type BuildingData = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; units: Unit[] };
@@ -81,9 +84,11 @@ function StructureEditor({ building, onSaved, onCancel }: { building: BuildingDa
 }
 
 /** Read-only grid of the building's doorbells; managers can switch to the structure editor. */
-export function BuildingDetail({ buildingId, onBack, renderUnit }: { buildingId: string; onBack: () => void; renderUnit?: (unit: Unit, building: BuildingData) => React.ReactNode }) {
+export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, startEditing }: { buildingId: string; onBack: () => void; renderUnit?: (unit: Unit, building: BuildingData) => React.ReactNode; evidence?: CensusRow | null; startEditing?: boolean }) {
   const { data, error, loading, reload } = useModuleApi<Detail>(`/api/v2/buildings?building=${buildingId}`);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(Boolean(startEditing));
+  const [reporting, setReporting] = useState(false);
+  const [reported, setReported] = useState(false);
   if (loading) return <Notice>Cargando edificio…</Notice>;
   if (!data) return <Notice tone="error">{error || "No se pudo cargar el edificio."}</Notice>;
 
@@ -92,7 +97,14 @@ export function BuildingDetail({ buildingId, onBack, renderUnit }: { buildingId:
   return (
     <div className="space-y-3">
       <button className={miniButtonClass} onClick={onBack} type="button"><ArrowLeft size={14} aria-hidden="true" />Volver</button>
-      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}</div>}>
+      {evidence ? (
+        <Notice tone="warning">
+          Evidencia del informe: {evidence.description || "sin descripción"}{evidence.diff ? ` · Propuesta: ${describeDiff(evidence.diff)}` : ""}{evidence.base_version !== building.structure_version ? " · El edificio cambió desde que se informó." : ""}
+        </Notice>
+      ) : null}
+      {reported ? <Notice tone="success">Informe enviado: Servicio y Territorios lo van a revisar.</Notice> : null}
+      {reporting ? <CensusReportForm buildingId={building.id} onCancel={() => setReporting(false)} onDone={() => { setReporting(false); setReported(true); }} units={building.units} version={building.structure_version} /> : null}
+      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}</div>}>
         {editing ? (
           <StructureEditor building={building} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />
         ) : building.units.length ? (
