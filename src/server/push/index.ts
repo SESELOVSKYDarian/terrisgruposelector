@@ -1,9 +1,10 @@
 import "server-only";
 
 import { createECDH, createPrivateKey, hkdfSync, randomBytes, sign, createCipheriv } from "crypto";
+import { buildNotification, type InternalEvent } from "@/server/events/processor";
 
 type PushSubscription = { id: string; endpoint: string; p256dh: string; auth: string };
-type PushEvent = { id: string; event_type: string; payload: { recipientId: string; slotDate?: string; detail?: string; title?: string; targetUrl?: string } };
+type PushEvent = InternalEvent;
 
 export type PushEventRepository = {
   listPushSubscriptions: (recipientId: string) => Promise<PushSubscription[]>;
@@ -33,11 +34,11 @@ export function getPublicVapidKey() {
   return vapidConfig()?.publicKey ?? null;
 }
 
+/** Push reuses the inbox mapping so both channels always say the same thing. */
 function pushMessage(event: PushEvent): PushMessage | null {
-  if (event.event_type === "OUTING_ASSIGNED") return { title: "Nueva salida asignada", body: `Tenés una salida asignada para el ${event.payload.slotDate ?? "día programado"}.${event.payload.detail ? ` ${event.payload.detail}` : ""}`, url: "/?view=outings", tag: `outing-${event.id}` };
-  if (event.event_type === "OUTING_UPDATED") return { title: "Tu salida fue actualizada", body: `Se actualizaron los datos de tu salida para el ${event.payload.slotDate ?? "día programado"}.${event.payload.detail ? ` ${event.payload.detail}` : ""}`, url: "/?view=outings", tag: `outing-${event.id}` };
-  if (event.event_type === "VISIT_REPORT_DUE" && event.payload.title) return { title: event.payload.title, body: "Recordatorio: completá el informe de la salida.", url: event.payload.targetUrl ?? "/?view=outings", tag: `report-${event.id}` };
-  return null;
+  const notification = buildNotification(event);
+  if (!notification) return null;
+  return { title: notification.title, body: notification.description, url: notification.targetUrl, tag: `${notification.entityType}-${event.id}` };
 }
 
 function createVapidAuthorization(endpoint: string, config: NonNullable<ReturnType<typeof vapidConfig>>) {

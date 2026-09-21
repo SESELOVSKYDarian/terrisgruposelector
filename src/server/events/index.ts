@@ -10,6 +10,7 @@ export const domainEventTypes = [
   "OUTING_CANCELLED",
   "OUTING_PUBLISHED",
   "OUTING_DRAFT_SUBMITTED",
+  "OUTING_DRAFT_RETURNED",
   "OUTING_DRAFT_APPROVED",
   "GROUP_WINDOW_OPENED",
   "GROUP_WINDOW_REMINDER",
@@ -31,15 +32,19 @@ type OutingEventPayload = {
   slotDate: string;
   conductorName?: string | null;
   detail?: string;
+  audience?: "conductor" | "reviewer";
 };
+
+type OutingWeekEventPayload = { recipientId: string; outingId: string; startsOn: string; detail?: string };
 
 export type DomainEventPayloads = {
   OUTING_ASSIGNED: OutingEventPayload;
   OUTING_UPDATED: OutingEventPayload;
   OUTING_CANCELLED: OutingEventPayload;
-  OUTING_PUBLISHED: { recipientId: string; outingId: string; startsOn: string };
-  OUTING_DRAFT_SUBMITTED: { recipientId: string; outingId: string; startsOn: string };
-  OUTING_DRAFT_APPROVED: { recipientId: string; outingId: string; startsOn: string };
+  OUTING_PUBLISHED: OutingWeekEventPayload;
+  OUTING_DRAFT_SUBMITTED: OutingWeekEventPayload;
+  OUTING_DRAFT_RETURNED: OutingWeekEventPayload;
+  OUTING_DRAFT_APPROVED: OutingWeekEventPayload;
   GROUP_WINDOW_OPENED: { recipientId: string; windowId: string; title: string };
   GROUP_WINDOW_REMINDER: { recipientId: string; windowId: string; title: string };
   GROUP_RESERVATION_COMPLETED: { recipientId: string; reservationId: string; title: string };

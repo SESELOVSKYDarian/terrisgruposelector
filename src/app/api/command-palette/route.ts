@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAdminSupabaseClient, getCurrentProfile } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
+import { getPlanningAuthority } from "@/server/outings/planning";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 
 export const runtime = "nodejs";
@@ -18,7 +19,8 @@ export async function GET(request: NextRequest) {
     const supabase = createAdminSupabaseClient();
     const canTerritories = hasPermission(permissions, "MANAGE_TERRITORIES");
     const canUsers = hasPermission(permissions, "MANAGE_USERS");
-    const canOutings = hasPermission(permissions, "PLAN_OUTINGS") || hasPermission(permissions, "PUBLISH_OUTINGS");
+    const planning = await getPlanningAuthority(profile);
+    const canOutings = planning.canPlan || planning.canPublish;
     const [territories, users, outings] = await Promise.all([
       canTerritories ? supabase.from("territories").select("id,number,name").eq("active", true).order("number").limit(sourceLimit) : Promise.resolve({ data: [], error: null }),
       canUsers ? supabase.from("profiles").select("id,full_name,username").eq("active", true).order("full_name").limit(sourceLimit) : Promise.resolve({ data: [], error: null }),

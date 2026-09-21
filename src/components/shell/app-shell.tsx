@@ -42,7 +42,7 @@ const sectionItems = (access: ShellAccess): { label?: string; items: NavItem[] }
   {
     label: "OPERACION",
     items: [
-      { id: "outings", label: "Salidas", icon: CalendarDays, visible: access.canPlanOutings },
+      { id: "outings", label: "Salidas", icon: CalendarDays },
       { id: "territories", label: "Territorios", icon: SlidersHorizontal, visible: access.canManageTerritories },
       { id: "reservations", label: "Reservas", icon: CalendarDays, visible: access.canUseReservations },
     ],

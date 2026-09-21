@@ -4,6 +4,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Ban,
   Bell,
   CalendarClock,
   CalendarDays,
@@ -23,12 +24,15 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
+  Send,
   Search,
   ShieldCheck,
   Star,
   Trash2,
   TriangleAlert,
+  Undo2,
   User,
   Users,
   Wand2,
@@ -61,6 +65,7 @@ import {
   type ServiceDay,
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
+import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthority, type PlanningStatus, type SlotStatus } from "@/modules/outings/workflow";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
@@ -174,12 +179,15 @@ type WeeklyOutingSlot = {
   conductor_id: string | null;
   highlighted: boolean;
   note: string | null;
+  status?: SlotStatus;
+  time_parse_status?: "PARSED" | "EMPTY" | "UNPARSEABLE" | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
   weekly_outing_slot_territories: WeeklyOutingSlotTerritory[];
 };
 type WeeklyOuting = {
   id: string;
   starts_on: string;
+  status?: PlanningStatus;
   weekly_outing_slots: WeeklyOutingSlot[];
 };
 type DeparturePoint = {
@@ -215,6 +223,7 @@ type AppData = {
   notifications: Notification[];
   territoryRounds: TerritoryRound[];
   weeklyOutings: WeeklyOuting[];
+  planningAccess: PlanningAuthority;
   departurePoints: DeparturePoint[];
   weekendRoster: WeekendRosterEntry[];
   territoryVisits: TerritoryVisit[];
@@ -270,6 +279,7 @@ const emptyData: AppData = {
   notifications: [],
   territoryRounds: [],
   weeklyOutings: [],
+  planningAccess: { canPlan: false, canPublish: false },
   departurePoints: [],
   weekendRoster: [],
   territoryVisits: [],
@@ -352,6 +362,7 @@ export default function Home() {
   }
 
   const isAdmin = Boolean(profile?.roles.includes("ADMIN"));
+  const isPlanner = data.planningAccess.canPlan || data.planningAccess.canPublish;
   const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
   const isConductor = Boolean(profile?.roles.includes("CONDUCTOR"));
   const openRound = data.rounds.find((round) => round.status === "OPEN");
@@ -677,10 +688,14 @@ export default function Home() {
     <main className="relative z-10 min-h-screen text-foreground">
       <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
-      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onCreateOuting={isAdmin ? () => void createOutingFromPalette() : undefined} onLogout={logout} user={profile}>
+      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onCreateOuting={isPlanner ? () => void createOutingFromPalette() : undefined} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
           <PersonalSettingsView activeView={activeView} />
+        ) : activeView === "outings" ? (
+          <div className="view-transition min-w-0" key="outings">
+            <WeeklyOutingsPanel data={data} mutate={mutate} />
+          </div>
         ) : isAdmin ? (
           <div className="view-transition min-w-0" key={activeView}>
             <AdminView
@@ -2449,6 +2464,13 @@ function displayDateEs(date: string) {
   return `${day} de ${monthNamesEs[month - 1]}`;
 }
 
+const planningStatusLabels: Record<PlanningStatus, string> = { DRAFT: "Borrador", IN_REVIEW: "En revisión", PUBLISHED: "Publicada" };
+const planningStatusStyles: Record<PlanningStatus, string> = {
+  DRAFT: "border-slate-400/25 bg-slate-500/10 text-slate-300",
+  IN_REVIEW: "border-amber-400/30 bg-amber-500/12 text-amber-200",
+  PUBLISHED: "border-emerald-400/30 bg-emerald-500/12 text-emerald-200",
+};
+
 function WeeklyOutingsPanel({
   data,
   mutate,
@@ -2456,6 +2478,18 @@ function WeeklyOutingsPanel({
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
 }) {
+  const isPlanner = data.planningAccess.canPlan || data.planningAccess.canPublish;
+  return isPlanner ? <WeeklyPlanningEditor data={data} mutate={mutate} /> : <PublishedPlanningView data={data} />;
+}
+
+function WeeklyPlanningEditor({
+  data,
+  mutate,
+}: {
+  data: AppData;
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+}) {
+  const authority = data.planningAccess;
   const sortedOutings = useMemo(
     () => [...data.weeklyOutings].sort((a, b) => a.starts_on.localeCompare(b.starts_on)),
     [data.weeklyOutings],
@@ -2463,6 +2497,9 @@ function WeeklyOutingsPanel({
   const [selectedId, setSelectedId] = useState(sortedOutings[0]?.id ?? "");
   const outing = sortedOutings.find((item) => item.id === selectedId) ?? sortedOutings[0];
   const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
+  // Weeks created before the workflow existed carry no status: they are the live, published plan.
+  const status: PlanningStatus = outing?.status ?? "PUBLISHED";
+  const canEdit = outing ? canEditWeek(authority, status) : false;
 
   function nextThursdayDefault() {
     const existingStarts = new Set(data.weeklyOutings.map((item) => item.starts_on));
@@ -2492,10 +2529,15 @@ function WeeklyOutingsPanel({
             value={outing?.id ?? ""}
           />
         </div>
+        {outing ? (
+          <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium", planningStatusStyles[status])}>
+            {planningStatusLabels[status]}
+          </span>
+        ) : null}
         <button className={primarySmallButtonClass} onClick={() => void createOuting()} type="button">
           <Plus size={16} aria-hidden="true" />Nueva semana
         </button>
-        {outing ? (
+        {outing && canEdit ? (
           <button
             className={secondaryButtonClass}
             onClick={() => void mutate("autoFillWeeklyOuting", { weekly_outing_id: outing.id })}
@@ -2505,18 +2547,95 @@ function WeeklyOutingsPanel({
             <Wand2 size={16} aria-hidden="true" />Generar automatico
           </button>
         ) : null}
-        {outing ? (
+        {outing && status === "DRAFT" && canPerformTransition(authority, "SUBMIT") ? (
+          <button className={secondaryButtonClass} onClick={() => void mutate("submitWeeklyOuting", { id: outing.id })} type="button">
+            <Send size={16} aria-hidden="true" />Enviar a revisión
+          </button>
+        ) : null}
+        {outing && status === "IN_REVIEW" && canPerformTransition(authority, "RETURN_TO_DRAFT") ? (
+          <button className={secondaryButtonClass} onClick={() => void mutate("returnWeeklyOutingToDraft", { id: outing.id })} type="button">
+            <Undo2 size={16} aria-hidden="true" />Devolver a borrador
+          </button>
+        ) : null}
+        {outing && status === "IN_REVIEW" && canPerformTransition(authority, "PUBLISH") ? (
+          <button className={primarySmallButtonClass} onClick={() => void mutate("publishWeeklyOuting", { id: outing.id })} type="button">
+            <CheckCircle2 size={16} aria-hidden="true" />Aprobar y publicar
+          </button>
+        ) : null}
+        {outing && canDeleteWeek(authority, status) ? (
           <button className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-rose-300" onClick={() => void mutate("deleteWeeklyOuting", { id: outing.id })} type="button">
             <Trash2 size={14} aria-hidden="true" />Eliminar esta semana
           </button>
         ) : null}
       </div>
 
+      {outing && status === "IN_REVIEW" && !canEdit ? (
+        <p className="px-1 text-sm text-slate-400">La planificación está en revisión: espera la respuesta del Superintendente de Servicio para seguir editando.</p>
+      ) : null}
+      {outing && status === "PUBLISHED" && canEdit ? (
+        <p className="px-1 text-sm text-slate-400">
+          Planificación publicada: los cambios se notifican al conductor afectado{authority.canPublish ? "" : " y al Superintendente de Servicio"}.
+        </p>
+      ) : null}
+
       {outing ? (
-        <WeeklyOutingDays data={data} conductors={conductors} mutate={mutate} outing={outing} />
+        <WeeklyOutingDays data={data} conductors={conductors} mutate={mutate} outing={outing} readOnly={!canEdit} />
       ) : (
         <EmptyState icon={<CalendarDays size={24} />} title="Todavia no hay semanas cargadas" text="Crea una semana para empezar a completar horarios." />
       )}
+    </section>
+  );
+}
+
+/** What everyone without planning authority sees: only PUBLISHED weeks, read-only. */
+function PublishedPlanningView({ data }: { data: AppData }) {
+  const weeks = useMemo(() => [...data.weeklyOutings].sort((a, b) => a.starts_on.localeCompare(b.starts_on)), [data.weeklyOutings]);
+  if (!weeks.length) {
+    return <EmptyState icon={<CalendarDays size={24} />} title="Todavia no hay planificacion publicada" text="Cuando se publique la planificacion semanal la vas a ver aca." />;
+  }
+  return (
+    <section className="space-y-6">
+      {weeks.map((week) => (
+        <div className="space-y-3" key={week.id}>
+          <h2 className="px-1 text-sm font-semibold text-white">Del {displayDateEs(week.starts_on)} al {displayDateEs(addDays(week.starts_on, 6))}</h2>
+          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+            {outingDayLabels.map((dayLabel, index) => {
+              const slotDate = addDays(week.starts_on, index);
+              const slots = week.weekly_outing_slots.filter((slot) => slot.slot_date === slotDate).sort((a, b) => a.sort_order - b.sort_order);
+              if (!slots.length) return null;
+              return (
+                <div className="glass-panel-soft flex flex-col gap-2.5 rounded-[1.35rem] p-3.5" key={slotDate}>
+                  <div className="px-0.5">
+                    <p className="text-sm font-semibold text-white">{dayLabel}</p>
+                    <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
+                  </div>
+                  {slots.map((slot) => {
+                    const cancelled = slot.status === "CANCELADA";
+                    const territories = [...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territories?.number ?? "?");
+                    return (
+                      <div className={cn("rounded-2xl p-3", slot.highlighted ? "bg-primary/[0.09]" : "bg-black/15", cancelled && "opacity-60")} key={slot.id}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={cn("inline-flex items-center gap-1.5 text-sm font-medium text-white", cancelled && "line-through")}>
+                            <Clock className="text-slate-500" size={13} aria-hidden="true" />{slot.hora || "Sin hora"}
+                          </span>
+                          {cancelled ? <span className="rounded-full border border-rose-400/30 bg-rose-500/12 px-2 py-0.5 text-xs font-medium text-rose-200">Cancelada</span> : null}
+                        </div>
+                        {slot.lugar ? <p className="mt-1.5 flex items-center gap-2 text-sm text-slate-300"><MapPin className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.lugar}</p> : null}
+                        {slot.profiles?.full_name ? <p className="mt-1 flex items-center gap-2 text-sm text-slate-300"><User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.profiles.full_name}</p> : null}
+                        {territories.length ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {territories.map((number, index) => <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>Territorio {number}</span>)}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
@@ -2623,11 +2742,13 @@ function WeeklyOutingDays({
   conductors,
   mutate,
   outing,
+  readOnly,
 }: {
   data: AppData;
   conductors: Profile[];
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
   outing: WeeklyOuting;
+  readOnly: boolean;
 }) {
   return (
     <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
@@ -2643,18 +2764,20 @@ function WeeklyOutingDays({
                 <p className="text-sm font-semibold text-white">{dayLabel}</p>
                 <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
               </div>
-              <button
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-white/[0.05] text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
-                onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
-                title="Agregar salida"
-                type="button"
-              >
-                <Plus size={15} aria-hidden="true" />
-              </button>
+              {readOnly ? null : (
+                <button
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-white/[0.05] text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
+                  onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
+                  title="Agregar salida"
+                  type="button"
+                >
+                  <Plus size={15} aria-hidden="true" />
+                </button>
+              )}
             </div>
             <div className="space-y-2.5">
               {slots.map((slot) => (
-                <WeeklyOutingSlotCard conductors={conductors} data={data} key={slot.id} mutate={mutate} slot={slot} />
+                <WeeklyOutingSlotCard conductors={conductors} data={data} key={slot.id} mutate={mutate} readOnly={readOnly} slot={slot} />
               ))}
               {!slots.length ? <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-slate-500">Sin salidas.</p> : null}
             </div>
@@ -2669,11 +2792,13 @@ function WeeklyOutingSlotCard({
   data,
   conductors,
   mutate,
+  readOnly,
   slot,
 }: {
   data: AppData;
   conductors: Profile[];
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  readOnly: boolean;
   slot: WeeklyOutingSlot;
 }) {
   const [territoryModalOpen, setTerritoryModalOpen] = useState(false);
@@ -2719,9 +2844,10 @@ function WeeklyOutingSlotCard({
     ? data.departurePoints.find((point) => point.departure_point_territories.some((entry) => entry.territory_id === sortedSlotTerritories[0].territory_id))
     : undefined;
   const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
+  const cancelled = slot.status === "CANCELADA";
 
   return (
-    <div className={cn("rounded-2xl p-3 transition", highlighted ? "bg-primary/[0.09]" : "bg-black/15")}>
+    <div className={cn("rounded-2xl p-3 transition", highlighted ? "bg-primary/[0.09]" : "bg-black/15", cancelled && "opacity-60")} inert={readOnly}>
       <div className="flex items-start justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/25 px-2 py-1.5">
           <Clock className="text-slate-500" size={13} aria-hidden="true" />
@@ -2738,11 +2864,25 @@ function WeeklyOutingSlotCard({
           >
             <Star fill={highlighted ? "currentColor" : "none"} size={15} aria-hidden="true" />
           </button>
+          <button
+            aria-label={cancelled ? "Reactivar salida" : "Cancelar salida"}
+            className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-600 transition hover:text-amber-300"
+            onClick={() => void mutate("setSlotStatus", { id: slot.id, status: cancelled ? "PROGRAMADA" : "CANCELADA" })}
+            title={cancelled ? "Reactivar salida" : "Cancelar salida"}
+            type="button"
+          >
+            {cancelled ? <RotateCcw size={14} aria-hidden="true" /> : <Ban size={14} aria-hidden="true" />}
+          </button>
           <button aria-label="Eliminar salida" className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-600 transition hover:text-rose-300" onClick={() => void mutate("deleteWeeklyOutingSlot", { id: slot.id })} title="Eliminar salida" type="button">
             <Trash2 size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
+
+      {slot.time_parse_status === "UNPARSEABLE" && slot.hora ? (
+        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-300"><TriangleAlert size={12} aria-hidden="true" />Hora sin interpretar: &ldquo;{slot.hora}&rdquo;. Elegí una hora para corregirla.</p>
+      ) : null}
+      {cancelled ? <p className="mt-1.5 text-xs font-medium text-rose-300">Salida cancelada</p> : null}
 
       <div className="mt-2 flex items-center gap-2">
         <User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />

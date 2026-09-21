@@ -8,7 +8,8 @@ import {
   type SessionProfile,
 } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
-import { emitDomainEvent } from "@/server/events";
+import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
+import { getPlanningAuthority } from "@/server/outings/planning";
 import { blockStatuses, reservationStatuses, roles } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -196,6 +197,8 @@ export async function GET() {
     const supabase = createAdminSupabaseClient();
     const isAdmin = profile.roles.includes("ADMIN");
     const canSeeBlocks = isAdmin || profile.roles.includes("CONDUCTOR");
+    const planning = await getPlanningAuthority(profile);
+    const isPlanner = planning.canPlan || planning.canPublish;
 
     const groupsQuery = isAdmin
       ? supabase.from("groups").select("*").order("name")
@@ -245,7 +248,9 @@ export async function GET() {
       supabase.from("block_round_statuses").select("*, blocks(label,territory_id,territories(number,name))").order("updated_at", { ascending: false }),
       isAdmin
         ? supabase.from("profiles").select("id, username, full_name, email, active, must_change_password, approval_status, password_updated_at, group_id, groups(name), profile_roles(role)").order("full_name")
-        : Promise.resolve({ data: [], error: null }),
+        : isPlanner
+          ? supabase.from("profiles").select("id, username, full_name, active, group_id, profile_roles(role)").eq("active", true).order("full_name")
+          : Promise.resolve({ data: [], error: null }),
       isAdmin
         ? supabase
             .from("admin_notifications")
@@ -257,16 +262,16 @@ export async function GET() {
         .from("territory_rounds")
         .select("*, territories(number,name), profiles!conductor_id(full_name,username)")
         .order("assigned_on", { ascending: false }),
-      isAdmin
+      isPlanner
         ? supabase
             .from("weekly_outings")
             .select("*, weekly_outing_slots(*, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(*, territories(number), territory_rounds(pending_block_labels,conductor_id)))")
             .order("starts_on", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
-      isAdmin
+      isAdmin || isPlanner
         ? supabase.from("departure_points").select("*, departure_point_territories(territory_id,sort_order,territories(number))").order("name")
         : Promise.resolve({ data: [], error: null }),
-      isAdmin
+      isAdmin || isPlanner
         ? supabase.from("weekend_roster").select("*, profiles!conductor_id(full_name,username)").order("service_date")
         : Promise.resolve({ data: [], error: null }),
       isAdmin
@@ -295,6 +300,21 @@ export async function GET() {
       territoryVisitsResult.error,
     ].find(Boolean);
     if (firstError) return fail(migrationMessage(firstError.message), 500);
+
+    // Everyone else only ever sees PUBLISHED weeks. A failure here (e.g. the Fase 6
+    // migration is pending) degrades to "no published plan" instead of breaking the app.
+    let publishedWeeks: unknown[] = [];
+    if (!isPlanner) {
+      const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const { data: published, error: publishedError } = await supabase
+        .from("weekly_outings")
+        .select("id, starts_on, status, weekly_outing_slots(id, weekly_outing_id, slot_date, sort_order, hora, lugar, conductor_id, highlighted, note, status, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(id, slot_id, territory_id, sort_order, display_override, territories(number)))")
+        .eq("status", "PUBLISHED")
+        .gte("starts_on", cutoff)
+        .order("starts_on", { ascending: true });
+      if (publishedError) console.warn("No se pudo leer la planificación publicada:", publishedError.message);
+      else publishedWeeks = published ?? [];
+    }
 
     const rounds = roundsResult.data ?? [];
     const blocks = blocksResult.data ?? [];
@@ -346,7 +366,8 @@ export async function GET() {
       profiles,
       notifications: notificationsResult.data ?? [],
       territoryRounds: territoryRoundsResult.data ?? [],
-      weeklyOutings: weeklyOutingsResult.data ?? [],
+      weeklyOutings: isPlanner ? weeklyOutingsResult.data ?? [] : publishedWeeks,
+      planningAccess: planning,
       departurePoints: departurePointsResult.data ?? [],
       weekendRoster: weekendRosterResult.data ?? [],
       territoryVisits: territoryVisitsResult.data ?? [],
@@ -503,7 +524,14 @@ export async function POST(request: Request) {
       return ok();
     }
 
-    assertAdmin(profile);
+    if (OUTING_ACTIONS.has(action)) {
+      // Weekly planning is authorized by planning authority (V2), not by the legacy ADMIN role.
+      // A null result means the action passed authorization and continues below (autoFillWeeklyOuting).
+      const outingResponse = await handleOutingAction(action, payload, profile);
+      if (outingResponse) return outingResponse;
+    } else {
+      assertAdmin(profile);
+    }
 
     if (action === "createAdminReservations") {
       const result = createAdminReservationSchema.safeParse(payload);
@@ -932,106 +960,6 @@ export async function POST(request: Request) {
       if ((user ?? []).some((entry) => entry.role === "ADMIN")) return fail("No se puede eliminar un usuario admin.", 403);
       const { error } = await supabase.from("profiles").delete().eq("id", id);
       if (error) return fail(error.message);
-      return ok();
-    }
-
-    if (action === "createWeeklyOuting") {
-      const startsOn = String(payload?.starts_on ?? "");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(startsOn) || new Date(`${startsOn}T00:00:00Z`).getUTCDay() !== 4) {
-        return fail("La fecha de inicio debe ser un jueves.", 422);
-      }
-      const { data: outing, error } = await supabase
-        .from("weekly_outings")
-        .insert({ starts_on: startsOn, created_by: profile.id })
-        .select("id")
-        .single();
-      if (error || !outing) return fail(error?.message ?? "No se pudo crear la semana.");
-      return ok({ id: outing.id });
-    }
-
-    if (action === "deleteWeeklyOuting") {
-      const { error } = await supabase.from("weekly_outings").delete().eq("id", String(payload?.id));
-      if (error) return fail(error.message);
-      return ok();
-    }
-
-    if (action === "createWeeklyOutingSlot") {
-      const { data: siblings } = await supabase
-        .from("weekly_outing_slots")
-        .select("sort_order")
-        .eq("weekly_outing_id", String(payload?.weekly_outing_id))
-        .eq("slot_date", String(payload?.slot_date))
-        .order("sort_order", { ascending: false })
-        .limit(1);
-      const nextOrder = (siblings?.[0]?.sort_order ?? -1) + 1;
-      const { error } = await supabase.from("weekly_outing_slots").insert({
-        weekly_outing_id: String(payload?.weekly_outing_id),
-        slot_date: String(payload?.slot_date),
-        sort_order: nextOrder,
-      });
-      if (error) return fail(error.message);
-      return ok();
-    }
-
-    if (action === "updateWeeklyOutingSlot") {
-      const slotId = String(payload?.id ?? "");
-      const { data: existingSlot, error: existingSlotError } = await supabase
-        .from("weekly_outing_slots")
-        .select("id,weekly_outing_id,slot_date,conductor_id,hora,lugar,note,highlighted")
-        .eq("id", slotId)
-        .maybeSingle();
-      if (existingSlotError || !existingSlot) return fail(existingSlotError?.message ?? "Salida no encontrada.", 404);
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (payload?.hora !== undefined) patch.hora = payload.hora ? String(payload.hora) : null;
-      if (payload?.lugar !== undefined) patch.lugar = payload.lugar ? String(payload.lugar) : null;
-      if (payload?.conductor_id !== undefined) patch.conductor_id = payload.conductor_id ? String(payload.conductor_id) : null;
-      if (payload?.highlighted !== undefined) patch.highlighted = Boolean(payload.highlighted);
-      if (payload?.note !== undefined) patch.note = payload.note ? String(payload.note) : null;
-      const { error } = await supabase.from("weekly_outing_slots").update(patch).eq("id", slotId);
-      if (error) return fail(error.message);
-      const conductorId = typeof patch.conductor_id === "string" ? patch.conductor_id : existingSlot.conductor_id;
-      if (conductorId) {
-        const assignmentChanged = patch.conductor_id !== undefined && patch.conductor_id !== existingSlot.conductor_id;
-        const updatedFields = ["hora", "lugar", "note", "highlighted"].filter((field) => patch[field] !== undefined);
-        if (assignmentChanged || updatedFields.length) {
-          const eventType = assignmentChanged ? "OUTING_ASSIGNED" : "OUTING_UPDATED";
-          const naturalKey = assignmentChanged
-            ? `weekly-outing-slot:${slotId}:assigned:${conductorId}`
-            : `weekly-outing-slot:${slotId}:updated:${updatedFields.map((field) => `${field}=${String(patch[field])}`).join("|")}`;
-          await emitDomainEvent({ type: eventType, naturalKey, actorId: profile.id, payload: { recipientId: conductorId, slotId, weeklyOutingId: existingSlot.weekly_outing_id, slotDate: existingSlot.slot_date, detail: updatedFields.length ? `Cambios: ${updatedFields.join(", ")}.` : undefined } });
-        }
-      }
-      return ok();
-    }
-
-    if (action === "deleteWeeklyOutingSlot") {
-      const { error } = await supabase.from("weekly_outing_slots").delete().eq("id", String(payload?.id));
-      if (error) return fail(error.message);
-      return ok();
-    }
-
-    if (action === "setSlotTerritories") {
-      const slotId = String(payload?.slot_id ?? "");
-      const entries = Array.isArray(payload?.territories) ? payload.territories : [];
-      if (!slotId) return fail("Falta la fila.", 422);
-
-      const { error: deleteError } = await supabase.from("weekly_outing_slot_territories").delete().eq("slot_id", slotId);
-      if (deleteError) return fail(deleteError.message);
-
-      const rows = entries.map((entry, index) => {
-        const item = entry as Record<string, unknown>;
-        return {
-          slot_id: slotId,
-          territory_id: String(item.territory_id),
-          territory_round_id: item.territory_round_id ? String(item.territory_round_id) : null,
-          display_override: item.display_override ? String(item.display_override) : null,
-          sort_order: index,
-        };
-      });
-      if (rows.length) {
-        const { error } = await supabase.from("weekly_outing_slot_territories").insert(rows);
-        if (error) return fail(error.message);
-      }
       return ok();
     }
 
