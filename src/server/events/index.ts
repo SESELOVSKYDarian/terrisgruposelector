@@ -8,6 +8,7 @@ export const domainEventTypes = [
   "OUTING_ASSIGNED",
   "OUTING_UPDATED",
   "OUTING_CANCELLED",
+  "OUTING_REMINDER",
   "OUTING_PUBLISHED",
   "OUTING_DRAFT_SUBMITTED",
   "OUTING_DRAFT_RETURNED",
@@ -43,6 +44,7 @@ export type DomainEventPayloads = {
   OUTING_ASSIGNED: OutingEventPayload;
   OUTING_UPDATED: OutingEventPayload;
   OUTING_CANCELLED: OutingEventPayload;
+  OUTING_REMINDER: OutingEventPayload;
   OUTING_PUBLISHED: OutingWeekEventPayload;
   OUTING_DRAFT_SUBMITTED: OutingWeekEventPayload;
   OUTING_DRAFT_RETURNED: OutingWeekEventPayload;
@@ -50,8 +52,8 @@ export type DomainEventPayloads = {
   GROUP_WINDOW_OPENED: GroupWindowEventPayload;
   GROUP_WINDOW_REMINDER: GroupWindowEventPayload;
   GROUP_RESERVATION_COMPLETED: GroupWindowEventPayload;
-  VISIT_REPORT_DUE: { recipientId: string; territoryRoundId: string; title: string; targetUrl?: string };
-  VISIT_REPORT_SUBMITTED: { recipientId: string; reportId: string; title: string };
+  VISIT_REPORT_DUE: { recipientId: string; slotId: string; title: string; targetUrl?: string };
+  VISIT_REPORT_SUBMITTED: { recipientId: string; reportId: string; title: string; targetUrl?: string };
   BUILDING_PROPOSED: { recipientId: string; proposalId: string; title: string };
   BUILDING_CENSUS_CORRECTION: { recipientId: string; correctionId: string; title: string };
   PERSONAL_TERRITORY_REPORT_DUE: { recipientId: string; assignmentId: string; title: string };

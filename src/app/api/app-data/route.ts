@@ -10,6 +10,7 @@ import {
 import { fail, ok } from "@/lib/server/responses";
 import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
+import { recomputeRound } from "@/server/territories/rounds";
 import { blockStatuses, reservationStatuses, roles } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -59,36 +60,6 @@ const territoryVisitEditSchema = z.object({
   pending_labels: z.array(z.string().trim().min(1)).default([]),
   conductor_id: z.string().uuid(),
 });
-
-async function recomputeTerritoryRound(supabase: ReturnType<typeof createAdminSupabaseClient>, roundId: string) {
-  const { data: visits, error } = await supabase
-    .from("territory_visits")
-    .select("visit_date, conductor_id, done_labels, pending_labels, created_at")
-    .eq("territory_round_id", roundId)
-    .order("visit_date", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) return error.message;
-
-  if (!visits || !visits.length) {
-    const { error: deleteError } = await supabase.from("territory_rounds").delete().eq("id", roundId);
-    return deleteError?.message ?? null;
-  }
-
-  const first = visits[0];
-  const last = visits[visits.length - 1];
-  const { error: updateError } = await supabase
-    .from("territory_rounds")
-    .update({
-      conductor_id: first.conductor_id,
-      assigned_on: first.visit_date,
-      completed_on: last.pending_labels.length === 0 ? last.visit_date : null,
-      pending_block_labels: last.pending_labels,
-      done_block_labels: last.done_labels,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", roundId);
-  return updateError?.message ?? null;
-}
 
 async function requireProfile() {
   const profile = await getCurrentProfile();
@@ -518,7 +489,7 @@ export async function POST(request: Request) {
       });
       if (visitError) return fail(visitError.message);
 
-      const recomputeError = await recomputeTerritoryRound(supabase, territoryRoundId);
+      const recomputeError = await recomputeRound(supabase, territoryRoundId, { derive: false });
       if (recomputeError) return fail(recomputeError);
 
       return ok();
@@ -669,7 +640,7 @@ export async function POST(request: Request) {
         .eq("id", id);
       if (error) return fail(error.message);
 
-      const recomputeError = await recomputeTerritoryRound(supabase, existing.territory_round_id);
+      const recomputeError = await recomputeRound(supabase, existing.territory_round_id, { derive: false });
       if (recomputeError) return fail(recomputeError);
       return ok();
     }
@@ -682,7 +653,7 @@ export async function POST(request: Request) {
       const { error } = await supabase.from("territory_visits").delete().eq("id", id);
       if (error) return fail(error.message);
 
-      const recomputeError = await recomputeTerritoryRound(supabase, existing.territory_round_id);
+      const recomputeError = await recomputeRound(supabase, existing.territory_round_id, { derive: false });
       if (recomputeError) return fail(recomputeError);
       return ok();
     }

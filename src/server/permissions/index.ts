@@ -58,6 +58,7 @@ export function navigationAccess(context: FreshPermissionContext) {
     canManageSystem: hasPermission(context, "MANAGE_SYSTEM"),
     canManageTerritories: hasPermission(context, "MANAGE_TERRITORIES"),
     canPlanOutings: hasPermission(context, "PLAN_OUTINGS") || hasPermission(context, "PUBLISH_OUTINGS"),
+    isConductor: context.capabilities.includes("CONDUCTOR"),
     canUseReservations:
       context.appointment === "ANCIANO" || context.groupResponsibilities.length > 0,
     hasOperationalResponsibility: [

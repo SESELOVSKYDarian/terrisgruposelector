@@ -145,3 +145,14 @@ export async function listConductors(supabase: AdminSupabase, options: { groupId
 export async function isEligibleConductor(supabase: AdminSupabase, profileId: string, groupId?: string) {
   return (await listConductors(supabase, { groupId })).some((conductor) => conductor.id === profileId);
 }
+
+/** Siervos de Territorios (they receive submitted reports); falls back to the reviewers while none is assigned. */
+export async function resolvePlannerIds(supabase: AdminSupabase) {
+  try {
+    const holders = await holdersOf(supabase, "SIERVO_TERRITORIOS");
+    if (holders.length) return holders;
+  } catch (error) {
+    console.warn("No se pudieron leer los Siervos de Territorios V2.", error);
+  }
+  return resolveReviewerIds(supabase);
+}

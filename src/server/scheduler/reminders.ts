@@ -38,29 +38,23 @@ export function initialDriverReportDeadline(scheduledAt: Date) {
 }
 
 export type WeekendReminderCandidate = { naturalKey: string; conductorId: string; outingId: string; reminderAt: Date };
-export type DriverReportReminderCandidate = { naturalKey: string; conductorId: string; territoryRoundId: string; reportFormUrl: string; reportDeadlineAt: Date; completedAt: Date | null };
-export type ReminderEmitter = (input: { type: "VISIT_REPORT_DUE"; naturalKey: string; payload: { recipientId: string; territoryRoundId: string; title: string; targetUrl: string } }) => Promise<void>;
+export type DriverReportReminderCandidate = { naturalKey: string; conductorId: string; slotId: string; reportFormUrl: string; reportDeadlineAt: Date; completedAt: Date | null };
+export type ReminderEmitter = (input: { type: "VISIT_REPORT_DUE"; naturalKey: string; payload: { recipientId: string; slotId: string; title: string; targetUrl: string } }) => Promise<void>;
 
 /** Future repository adapters pass real V2 rows here; extensions alter the stored deadline/reminderAt, not this runner. */
 export async function runDriverReportReminders(candidates: DriverReportReminderCandidate[], emit: ReminderEmitter, now = new Date()) {
   let emitted = 0;
   for (const candidate of candidates) {
     if (candidate.completedAt || candidate.reportDeadlineAt > now) continue;
-    await emit({ type: "VISIT_REPORT_DUE", naturalKey: candidate.naturalKey, payload: { recipientId: candidate.conductorId, territoryRoundId: candidate.territoryRoundId, title: "Informe de salida pendiente", targetUrl: candidate.reportFormUrl } });
+    await emit({ type: "VISIT_REPORT_DUE", naturalKey: candidate.naturalKey, payload: { recipientId: candidate.conductorId, slotId: candidate.slotId, title: "Informe de salida pendiente", targetUrl: candidate.reportFormUrl } });
     emitted += 1;
   }
   return emitted;
 }
 
-export type PendingReminder = { name: "weekend" | "driver-report"; status: "defined-but-pending"; reason: string };
+export type PendingReminder = { name: string; status: "defined-but-pending"; reason: string };
 
-/**
- * Fase 5 deliberately does not query legacy slots: `hora` is text and there is
- * no completed driver-report signal, so wiring them would create false alerts.
- */
+/** Data-backed jobs live in jobs.ts; this stays a pure list of what is still not wired. */
 export async function runReminderJobs(): Promise<{ pending: PendingReminder[]; emitted: number }> {
-  return { emitted: 0, pending: [
-    { name: "weekend", status: "defined-but-pending", reason: "weekend_roster has only a date; no V2 outing timestamptz/deadline is available." },
-    { name: "driver-report", status: "defined-but-pending", reason: "weekly_outing_slots.hora is text and no completed driver-report form/signal exists yet." },
-  ] };
+  return { emitted: 0, pending: [] };
 }

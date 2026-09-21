@@ -1,8 +1,9 @@
 export type InternalNotification = { eventId: string; recipientId: string; type: string; title: string; description: string; entityType: string; entityId: string; targetUrl: string };
-export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; territoryRoundId?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; windowId?: string; audience?: "conductor" | "reviewer" } };
+export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; windowId?: string; reportId?: string; audience?: "conductor" | "reviewer" } };
 export type InternalEventRepository = { createInternalNotification: (notification: InternalNotification) => Promise<boolean>; recordDelivery: (eventId: string, recipientId: string) => Promise<void> };
 
 const OUTINGS_URL = "/?view=outings";
+const MY_OUTINGS_URL = "/?view=myOutings";
 const RESERVATIONS_URL = "/?view=reservations";
 
 function withDetail(text: string, detail?: string) {
@@ -14,18 +15,24 @@ export function buildNotification(event: InternalEvent): InternalNotification | 
   const payload = event.payload;
   const base = { eventId: event.id, recipientId: payload.recipientId, type: event.event_type };
 
-  if (event.event_type === "VISIT_REPORT_DUE" && payload.territoryRoundId && payload.title) {
-    return { ...base, title: payload.title, description: "Recordatorio: completá el informe de la salida.", entityType: "territory_round", entityId: payload.territoryRoundId, targetUrl: payload.targetUrl ?? OUTINGS_URL };
+  if (event.event_type === "VISIT_REPORT_DUE" && payload.slotId && payload.title) {
+    return { ...base, title: payload.title, description: "Recordatorio: completá el informe de la salida.", entityType: "weekly_outing_slot", entityId: payload.slotId, targetUrl: payload.targetUrl ?? MY_OUTINGS_URL };
+  }
+  if (event.event_type === "VISIT_REPORT_SUBMITTED" && payload.reportId && payload.title) {
+    return { ...base, title: "Informe de salida enviado", description: payload.title, entityType: "outing_report", entityId: payload.reportId, targetUrl: payload.targetUrl ?? OUTINGS_URL };
   }
 
   if (payload.slotId && payload.slotDate) {
     const reviewer = payload.audience === "reviewer";
-    const slot = { entityType: "weekly_outing_slot", entityId: payload.slotId, targetUrl: OUTINGS_URL };
+    const slot = { entityType: "weekly_outing_slot", entityId: payload.slotId, targetUrl: reviewer ? OUTINGS_URL : `${MY_OUTINGS_URL}&highlight=${payload.slotId}` };
     if (event.event_type === "OUTING_ASSIGNED") {
       return { ...base, ...slot, title: "Nueva salida asignada", description: withDetail(`Tienes una salida asignada para el ${payload.slotDate}.`, payload.detail) };
     }
     if (event.event_type === "OUTING_UPDATED") {
       return { ...base, ...slot, title: reviewer ? "Salida publicada modificada" : "Tu salida fue actualizada", description: withDetail(`${reviewer ? "Se modificó una salida publicada" : "Se actualizaron los datos de tu salida"} para el ${payload.slotDate}.`, payload.detail) };
+    }
+    if (event.event_type === "OUTING_REMINDER") {
+      return { ...base, ...slot, title: "Recordatorio de salida", description: withDetail(`Tenés una salida el ${payload.slotDate}.`, payload.detail) };
     }
     if (event.event_type === "OUTING_CANCELLED") {
       return { ...base, ...slot, title: reviewer ? "Salida cancelada" : "Tu salida fue cancelada", description: withDetail(`${reviewer ? "Se canceló una salida" : "Se canceló tu salida"} del ${payload.slotDate}.`, payload.detail) };

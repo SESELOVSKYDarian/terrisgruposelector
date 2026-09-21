@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronsLeft,
+  ClipboardList,
   Keyboard,
   LogOut,
   Menu,
@@ -31,6 +32,7 @@ export type ShellAccess = {
   canManageTerritories: boolean;
   canPlanOutings: boolean;
   canUseReservations: boolean;
+  isConductor: boolean;
   hasOperationalResponsibility: boolean;
 };
 
@@ -43,6 +45,7 @@ const sectionItems = (access: ShellAccess): { label?: string; items: NavItem[] }
     label: "OPERACION",
     items: [
       { id: "outings", label: "Salidas", icon: CalendarDays },
+      { id: "myOutings", label: "Mis salidas", icon: ClipboardList, visible: access.isConductor },
       { id: "territories", label: "Territorios", icon: SlidersHorizontal, visible: access.canManageTerritories },
       { id: "reservations", label: "Reservas", icon: CalendarDays, visible: access.canUseReservations },
     ],

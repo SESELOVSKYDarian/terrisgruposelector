@@ -72,6 +72,7 @@ import { ListToolbar, PaginationBar, useListControls } from "./_components/list-
 import { SubTabs } from "@/components/v2/ui";
 import { RecurringConductorsPanel } from "@/components/v2/outings/recurring-conductors-panel";
 import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
+import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -353,6 +354,7 @@ export default function Home() {
     canManageTerritories: false,
     canPlanOutings: false,
     canUseReservations: false,
+    isConductor: false,
     hasOperationalResponsibility: false,
   });
 
@@ -383,7 +385,7 @@ export default function Home() {
       } catch {
         // The shell stays safely minimal if the permission migration has not
         // been applied yet; authorization never falls back to client roles.
-        setShellAccess({ canManageUsers: false, canManageSystem: false, canManageTerritories: false, canPlanOutings: false, canUseReservations: false, hasOperationalResponsibility: false });
+        setShellAccess({ canManageUsers: false, canManageSystem: false, canManageTerritories: false, canPlanOutings: false, canUseReservations: false, isConductor: false, hasOperationalResponsibility: false });
       }
       setLoadedAt(Date.now());
     } catch (error) {
@@ -400,14 +402,14 @@ export default function Home() {
 
   useEffect(() => {
     const viewByPath: Record<string, string> = {
-      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
+      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/mis-salidas": "myOutings", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
     };
     setActiveView(viewByPath[pathname] ?? new URLSearchParams(window.location.search).get("view") ?? "dashboard");
   }, [pathname]);
 
   function changeView(view: string) {
     const pathByView: Record<string, string> = {
-      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
+      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", myOutings: "/app/mis-salidas", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
     };
     setActiveView(view);
     if (pathByView[view]) window.history.pushState(null, "", pathByView[view]);
@@ -699,6 +701,10 @@ export default function Home() {
         ) : activeView === "outings" ? (
           <div className="view-transition min-w-0" key="outings">
             <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />
+          </div>
+        ) : activeView === "myOutings" && shellAccess.isConductor ? (
+          <div className="view-transition min-w-0" key="myOutings">
+            <MyOutingsPanel />
           </div>
         ) : activeView === "reservations" && shellAccess.canUseReservations ? (
           <div className="view-transition min-w-0" key="reservations">
