@@ -9,6 +9,7 @@ import type { PlanningAuthority } from "@/modules/outings/workflow";
 import { ApiError, forbid } from "@/server/api";
 import { initialDriverReportDeadline } from "@/server/scheduler/reminders";
 import { recomputeRound, territoryLabels } from "@/server/territories/rounds";
+import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { loadWeek, resolvePlannerIds, safeEmit, writeAudit, type AdminSupabase } from "./planning";
 
 export type ReportCtx = { supabase: AdminSupabase; profile: SessionProfile; authority: PlanningAuthority };
@@ -29,7 +30,8 @@ export async function territoryFormState(supabase: AdminSupabase, territoryId: s
     if (error) throw new Error(error.message);
     prior = priorDoneLabels((visits ?? []) as VisitRow[]);
   }
-  return { labels, prior_done: prior };
+  const warnings = await activeDoNotVisit(supabase, [territoryId]);
+  return { labels, prior_done: prior, do_not_visit: warnings.map((item) => item.address) };
 }
 
 const SLOT_SELECT = "id,weekly_outing_id,slot_date,hora,lugar,starts_at,status,group_id,conductor_id,weekly_outings!inner(status),weekly_outing_slot_territories(territory_id,sort_order,territories(number,name))";
@@ -99,6 +101,8 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
   if (roundVisitsError) throw new Error(roundVisitsError.message);
   const visitsByRound = new Map<string, VisitRow[]>();
   for (const visit of (roundVisits ?? []) as VisitRow[]) visitsByRound.set(visit.territory_round_id, [...(visitsByRound.get(visit.territory_round_id) ?? []), visit]);
+  const warningRows = await activeDoNotVisit(supabase, territoryIds);
+  const warningsOf = (territoryId: string) => warningRows.filter((row) => row.territory_id === territoryId).map((row) => row.address);
   const openRoundByTerritory = new Map((openRounds ?? []).map((round) => [round.territory_id as string, round.id as string]));
 
   const profileIds = [...new Set([...slots.map((slot) => slot.conductor_id), ...(reports ?? []).map((report) => report.submitted_by as string | null)].filter((id): id is string => Boolean(id)))];
@@ -129,6 +133,7 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
         planned: Boolean(visit.planned),
         round_closed: Boolean(round?.completed_on),
         labels: labelsByTerritory.get(territoryId) ?? [],
+        do_not_visit: warningsOf(territoryId),
         prior_done: priorDoneLabels(visitsByRound.get(visit.territory_round_id as string) ?? [], visit.id as string),
       };
     });
@@ -139,6 +144,7 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
         number: territoryMeta.get(territoryId)?.number ?? "?",
         name: territoryMeta.get(territoryId)?.name ?? null,
         labels: labelsByTerritory.get(territoryId) ?? [],
+        do_not_visit: warningsOf(territoryId),
         prior_done: roundId ? priorDoneLabels(visitsByRound.get(roundId) ?? []) : [],
       };
     });

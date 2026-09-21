@@ -3,6 +3,7 @@ import "server-only";
 import { formatConductorName } from "@/modules/territories/names";
 import { territoryMapState, type TerritoryMapState } from "@/modules/map/geometry";
 import type { AdminSupabase } from "@/server/outings/planning";
+import { doNotVisitCounts } from "@/server/territories/do-not-visit";
 
 export type MapTerritoryStats = {
   territory_id: string;
@@ -22,11 +23,12 @@ export type MapTerritoryStats = {
 
 /** Hover/detail numbers for every active territory, from the same rounds the S-13 uses. */
 export async function loadTerritoryStats(supabase: AdminSupabase): Promise<MapTerritoryStats[]> {
-  const [territories, blocks, rounds, visits] = await Promise.all([
+  const [territories, blocks, rounds, visits, dnv] = await Promise.all([
     supabase.from("territories").select("id, number, name").eq("active", true).order("number"),
     supabase.from("blocks").select("territory_id, label").eq("active", true),
     supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, pending_block_labels, profiles!conductor_id(full_name)"),
     supabase.from("territory_visits").select("visit_date, territory_rounds!inner(territory_id)"),
+    doNotVisitCounts(supabase).catch(() => new Map<string, number>()),
   ]);
   for (const result of [territories, blocks, rounds, visits]) if (result.error) throw new Error(result.error.message);
 
@@ -60,7 +62,7 @@ export async function loadTerritoryStats(supabase: AdminSupabase): Promise<MapTe
       open_round: open ? { conductor: formatConductorName((profile as { full_name?: string } | null)?.full_name), assigned_on: open.assigned_on as string } : null,
       last_completed_on: lastCompleted,
       last_activity_on: lastVisit.get(id) ?? null,
-      do_not_visit: 0,
+      do_not_visit: dnv.get(id) ?? 0,
       buildings: 0,
     };
   });

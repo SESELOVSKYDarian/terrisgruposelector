@@ -75,6 +75,8 @@ import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
 import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
 import { S13View } from "@/components/v2/territories/s13-view";
 import { MapView } from "@/components/v2/territories/map-view";
+import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
+import { warningsForTerritories, type DoNotVisitItem } from "@/modules/territories/do-not-visit";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -231,6 +233,7 @@ type AppData = {
   territoryRounds: TerritoryRound[];
   weeklyOutings: WeeklyOuting[];
   planningAccess: PlanningAuthority;
+  doNotVisit: DoNotVisitItem[];
   departurePoints: DeparturePoint[];
   weekendRoster: WeekendRosterEntry[];
   territoryVisits: TerritoryVisit[];
@@ -287,6 +290,7 @@ const emptyData: AppData = {
   territoryRounds: [],
   weeklyOutings: [],
   planningAccess: { canPlan: false, canPublish: false },
+  doNotVisit: [],
   departurePoints: [],
   weekendRoster: [],
   territoryVisits: [],
@@ -848,12 +852,12 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }];
-  const [tab, setTab] = useState<"list" | "map" | "s13">(tabs[0].id);
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "map" | "s13" | "dnv">(tabs[0].id);
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : <S13View />}
     </div>
   );
 }
@@ -2720,6 +2724,7 @@ function PublishedPlanningView({ data }: { data: AppData }) {
                             {territories.map((number, index) => <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>Territorio {number}</span>)}
                           </div>
                         ) : null}
+                        <DoNotVisitWarning items={warningsForTerritories(data.doNotVisit, new Map(data.territories.map((territory) => [territory.id, territory.number])), slot.weekly_outing_slot_territories.map((entry) => entry.territory_id))} />
                       </div>
                     );
                   })}
@@ -3011,6 +3016,8 @@ function WeeklyOutingSlotCard({
           <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><MapIcon size={13} aria-hidden="true" />Elegir territorios</span>
         )}
       </button>
+
+      <DoNotVisitWarning items={warningsForTerritories(data.doNotVisit, new Map(data.territories.map((territory) => [territory.id, territory.number])), sortedSlotTerritories.map((entry) => entry.territory_id))} />
 
       {territoryModalOpen ? (
         <SlotTerritoryModal data={data} mutate={mutate} onClose={() => setTerritoryModalOpen(false)} slot={slot} />

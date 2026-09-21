@@ -11,6 +11,7 @@ import { fail, ok } from "@/lib/server/responses";
 import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
 import { recomputeRound } from "@/server/territories/rounds";
+import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { blockStatuses, reservationStatuses, roles } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -287,6 +288,16 @@ export async function GET() {
       else publishedWeeks = published ?? [];
     }
 
+    // "No visitar" warnings travel with the plan: only for territories in outings this user can see.
+    const visibleWeeks = (isPlanner ? weeklyOutingsResult.data ?? [] : publishedWeeks) as { weekly_outing_slots?: { weekly_outing_slot_territories?: { territory_id: string }[] }[] }[];
+    const planTerritoryIds = [...new Set(visibleWeeks.flatMap((week) => (week.weekly_outing_slots ?? []).flatMap((slot) => (slot.weekly_outing_slot_territories ?? []).map((entry) => entry.territory_id))))];
+    let doNotVisit: { id: string; territory_id: string; address: string }[] = [];
+    try {
+      doNotVisit = await activeDoNotVisit(supabase, planTerritoryIds);
+    } catch (warningError) {
+      console.warn("No se pudieron leer las direcciones No visitar:", warningError);
+    }
+
     const rounds = roundsResult.data ?? [];
     const blocks = blocksResult.data ?? [];
     const statuses = statusesResult.data ?? [];
@@ -339,6 +350,7 @@ export async function GET() {
       territoryRounds: territoryRoundsResult.data ?? [],
       weeklyOutings: isPlanner ? weeklyOutingsResult.data ?? [] : publishedWeeks,
       planningAccess: planning,
+      doNotVisit,
       departurePoints: departurePointsResult.data ?? [],
       weekendRoster: weekendRosterResult.data ?? [],
       territoryVisits: territoryVisitsResult.data ?? [],

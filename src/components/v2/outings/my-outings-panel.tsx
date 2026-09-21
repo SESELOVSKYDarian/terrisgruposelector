@@ -7,10 +7,11 @@ import { miniButtonClass, primarySmallButtonClass, secondaryButtonClass } from "
 import { formatDateEs } from "@/modules/outings/time";
 import { cn } from "@/lib/utils";
 import { useHighlight } from "../highlight";
+import { DoNotVisitWarning } from "../do-not-visit";
 import { Card, Empty, Notice, Pill, SubTabs, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 
-type Territory = { territory_id: string; number: string | number; name: string | null; labels: string[]; prior_done: string[] };
+type Territory = { territory_id: string; number: string | number; name: string | null; labels: string[]; prior_done: string[]; do_not_visit?: string[] };
 type Entry = Territory & { done_labels: string[]; planned: boolean; round_closed?: boolean };
 type Report = { id: string; notes: string | null; submitted_by_name: string | null; on_behalf: boolean; entries: (Entry & { pending_labels: string[] })[] };
 type Slot = { id: string; slot_date: string; hora: string | null; lugar: string | null; status: string; conductor_name: string | null; mine: boolean; overdue: boolean; territories: Territory[]; report: Report | null };
@@ -40,7 +41,7 @@ function ReportForm({ slot, state, onCancel, run, busy }: { slot: Slot; state: S
       const response = await fetch(`/api/v2/my-outings?territory=${territoryId}`, { credentials: "same-origin" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
-      setEntries((current) => [...current, { territory_id: territoryId, number: meta?.number ?? "?", name: meta?.name ?? null, labels: body.labels ?? [], prior_done: body.prior_done ?? [], done_labels: [], planned: false }]);
+      setEntries((current) => [...current, { territory_id: territoryId, number: meta?.number ?? "?", name: meta?.name ?? null, labels: body.labels ?? [], prior_done: body.prior_done ?? [], do_not_visit: body.do_not_visit ?? [], done_labels: [], planned: false }]);
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : "No se pudo cargar el territorio.");
     }
@@ -63,6 +64,7 @@ function ReportForm({ slot, state, onCancel, run, busy }: { slot: Slot; state: S
                 {!entry.planned ? <button aria-label="Quitar territorio" className="text-muted hover:text-rose-300" onClick={() => setEntries((current) => current.filter((item) => item.territory_id !== entry.territory_id))} type="button"><X size={15} /></button> : null}
               </div>
             </div>
+            <DoNotVisitWarning items={(entry.do_not_visit ?? []).map((address) => ({ id: `${entry.territory_id}:${address}`, number: entry.number, address }))} />
             {entry.prior_done.length ? <p className="text-xs text-muted">Ya hechas en esta vuelta: {entry.prior_done.join(", ")}</p> : null}
             {remaining.length ? (
               <div className="flex flex-wrap gap-1.5">
@@ -117,6 +119,7 @@ function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (
           {cancelled ? <Pill tone="rose">Cancelada</Pill> : slot.report ? <Pill tone="emerald"><CheckCircle2 className="mr-1" size={12} aria-hidden="true" />Informe enviado</Pill> : slot.overdue ? <Pill tone="amber"><TriangleAlert className="mr-1" size={12} aria-hidden="true" />Informe pendiente</Pill> : <Pill tone="sky">Programada</Pill>}
         </div>
       </div>
+      <DoNotVisitWarning items={slot.territories.flatMap((territory) => (territory.do_not_visit ?? []).map((address) => ({ id: `${territory.territory_id}:${address}`, number: territory.number, address })))} />
       <p className="mt-2 text-sm text-foreground/90">{slot.territories.length ? slot.territories.map((territory) => `Territorio ${territory.number}`).join(" + ") : "Sin territorios asignados"}</p>
       {slot.report ? <p className="mt-1 text-xs text-muted" data-entity-id={slot.report.id}>{slot.report.on_behalf ? `Cargado por ${slot.report.submitted_by_name ?? "otra persona"}` : "Cargado por el conductor"}{slot.report.entries.length ? ` · ${slot.report.entries.map((entry) => `T${entry.number}: ${entry.done_labels.length} manzana${entry.done_labels.length === 1 ? "" : "s"}`).join(", ")}` : ""}</p> : null}
       {!cancelled && !open ? (
