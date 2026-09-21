@@ -47,3 +47,8 @@ export function formatDateEs(isoDate: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : isoDate;
 }
+
+/** Today's calendar date in Argentina ("YYYY-MM-DD"), independent of the server zone. */
+export function argentinaToday(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: OUTING_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
