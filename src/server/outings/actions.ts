@@ -26,6 +26,7 @@ import {
   type AdminSupabase,
   type WeekRow,
 } from "./planning";
+import { materializeTemplate } from "./recurring";
 
 /** Every action that mutates the weekly plan. They all go through planning authority, not legacy ADMIN. */
 export const OUTING_ACTIONS = new Set([
@@ -213,6 +214,13 @@ export async function handleOutingAction(action: string, payload: Payload, profi
       const { data: outing, error } = await supabase.from("weekly_outings").insert({ starts_on: startsOn, created_by: profile.id }).select("id").single();
       if (error || !outing) return fail(migrationHint(error?.message ?? "No se pudo crear la semana."));
       await writeAudit(supabase, { actorId: profile.id, action: "WEEK_CREATED", entityType: "weekly_outing", entityId: outing.id, metadata: { starts_on: startsOn } });
+      // New weeks start from the recurring template (starred conductors). A missing template
+      // table (Fase 7 migration pending) simply means an empty week, as before.
+      try {
+        await materializeTemplate(supabase, { id: outing.id, starts_on: startsOn });
+      } catch (templateError) {
+        console.warn("No se pudo aplicar la plantilla semanal:", templateError);
+      }
       return ok({ id: outing.id });
     }
 

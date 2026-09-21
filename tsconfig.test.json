@@ -13,6 +13,7 @@
     "src/modules/users/permissions.ts",
     "src/modules/outings/time.ts",
     "src/modules/outings/workflow.ts",
+    "src/modules/outings/recurring.ts",
     "src/server/events/processor.ts",
     "src/server/scheduler/reminders.ts"
   ]

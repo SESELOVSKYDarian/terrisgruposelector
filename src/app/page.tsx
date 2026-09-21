@@ -69,6 +69,8 @@ import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthorit
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
+import { SubTabs } from "@/components/v2/ui";
+import { RecurringConductorsPanel } from "@/components/v2/outings/recurring-conductors-panel";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -694,7 +696,7 @@ export default function Home() {
           <PersonalSettingsView activeView={activeView} />
         ) : activeView === "outings" ? (
           <div className="view-transition min-w-0" key="outings">
-            <WeeklyOutingsPanel data={data} mutate={mutate} />
+            <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />
           </div>
         ) : isAdmin ? (
           <div className="view-transition min-w-0" key={activeView}>
@@ -1282,7 +1284,7 @@ function AdminView({
   }
 
   if (activeView === "outings") {
-    return <WeeklyOutingsPanel data={data} mutate={mutate} />;
+    return <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />;
   }
 
   if (activeView === "weekendRoster") {
@@ -2471,15 +2473,48 @@ const planningStatusStyles: Record<PlanningStatus, string> = {
   PUBLISHED: "border-emerald-400/30 bg-emerald-500/12 text-emerald-200",
 };
 
+/** Salidas: everyone sees the published plan; planners also get Planificación / Conductores / Puntos de salida. */
 function WeeklyOutingsPanel({
   data,
   mutate,
+  setModal,
 }: {
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+  setModal: (modal: ModalState) => void;
 }) {
   const isPlanner = data.planningAccess.canPlan || data.planningAccess.canPublish;
-  return isPlanner ? <WeeklyPlanningEditor data={data} mutate={mutate} /> : <PublishedPlanningView data={data} />;
+  const [tab, setTab] = useState<"planning" | "conductors" | "points">("planning");
+  const [conductorTab, setConductorTab] = useState<"weekly" | "weekend">("weekly");
+  if (!isPlanner) return <PublishedPlanningView data={data} />;
+  return (
+    <div className="space-y-4">
+      <SubTabs
+        onChange={setTab}
+        tabs={[
+          { id: "planning", label: "Planificación" },
+          { id: "conductors", label: "Conductores" },
+          { id: "points", label: "Puntos de salida" },
+        ]}
+        value={tab}
+      />
+      {tab === "planning" ? <WeeklyPlanningEditor data={data} mutate={mutate} /> : null}
+      {tab === "conductors" ? (
+        <div className="space-y-4">
+          <SubTabs
+            onChange={setConductorTab}
+            tabs={[
+              { id: "weekly", label: "Semanales" },
+              { id: "weekend", label: "Fin de semana" },
+            ]}
+            value={conductorTab}
+          />
+          {conductorTab === "weekly" ? <RecurringConductorsPanel weeks={data.weeklyOutings} /> : <WeekendRosterPanel data={data} mutate={mutate} />}
+        </div>
+      ) : null}
+      {tab === "points" ? <DeparturePointsPanel data={data} mutate={mutate} setModal={setModal} /> : null}
+    </div>
+  );
 }
 
 function WeeklyPlanningEditor({

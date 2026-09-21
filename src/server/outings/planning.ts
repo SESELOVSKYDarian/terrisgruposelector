@@ -120,3 +120,28 @@ export async function loadWeek(supabase: AdminSupabase, weekId: string): Promise
     submitted_by: data.submitted_by ?? null,
   };
 }
+
+export type ConductorOption = { id: string; full_name: string; group_id: string | null };
+
+/**
+ * Profiles with the CONDUCTOR characteristic (V2 capability, or legacy CONDUCTOR/ADMIN role
+ * while V1 still exists). Optionally restricted to one group.
+ */
+export async function listConductors(supabase: AdminSupabase, options: { groupId?: string } = {}): Promise<ConductorOption[]> {
+  const ids = new Set<string>();
+  const capabilities = await supabase.from("profile_capabilities").select("profile_id").eq("capability", "CONDUCTOR").eq("active", true);
+  if (!capabilities.error) for (const row of capabilities.data ?? []) ids.add(row.profile_id as string);
+  const legacy = await supabase.from("profile_roles").select("profile_id").in("role", ["CONDUCTOR", "ADMIN"]);
+  if (legacy.error) throw new Error(legacy.error.message);
+  for (const row of legacy.data ?? []) ids.add(row.profile_id as string);
+  if (!ids.size) return [];
+  let query = supabase.from("profiles").select("id, full_name, group_id").in("id", [...ids]).eq("active", true).order("full_name");
+  if (options.groupId) query = query.eq("group_id", options.groupId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ConductorOption[];
+}
+
+export async function isEligibleConductor(supabase: AdminSupabase, profileId: string, groupId?: string) {
+  return (await listConductors(supabase, { groupId })).some((conductor) => conductor.id === profileId);
+}
