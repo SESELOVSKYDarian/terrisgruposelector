@@ -22,17 +22,21 @@ export async function GET(request: NextRequest) {
     const canUsers = hasPermission(permissions, "MANAGE_USERS");
     const planning = await getPlanningAuthority(profile);
     const canOutings = planning.canPlan || planning.canPublish;
-    const [territories, users, outings] = await Promise.all([
+    const [territories, users, outings, announcements] = await Promise.all([
       canTerritories ? supabase.from("territories").select("id,number,name").eq("active", true).order("number").limit(sourceLimit) : Promise.resolve({ data: [], error: null }),
       canUsers ? supabase.from("profiles").select("id,full_name,username").eq("active", true).order("full_name").limit(sourceLimit) : Promise.resolve({ data: [], error: null }),
       canOutings ? supabase.from("weekly_outings").select("id,starts_on").order("starts_on", { ascending: false }).limit(sourceLimit) : Promise.resolve({ data: [], error: null }),
+      // Announcements are for everyone.
+      supabase.from("announcements").select("id,title").is("archived_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
     const error = [territories.error, users.error, outings.error].find(Boolean);
+    // A missing announcements table (migration pending) must not break the palette.
     if (error) return fail(error.message, 500);
     return ok({ entries: [
       ...(territories.data ?? []).filter((item) => matches(`territorio ${item.number} ${item.name}`, term)).map((item) => ({ id: `territory:${item.id}`, type: "territory", label: `Territorio #${item.number}`, sublabel: item.name || undefined, view: "territories" })),
       ...(users.data ?? []).filter((item) => matches(`${item.full_name} ${item.username}`, term)).map((item) => ({ id: `user:${item.id}`, type: "user", label: item.full_name, sublabel: `@${item.username}`, view: "users" })),
       ...(outings.data ?? []).filter((item) => matches(`salida ${item.starts_on}`, term)).map((item) => ({ id: `outing:${item.id}`, type: "outing", label: `Salida: semana del ${item.starts_on}`, sublabel: "Planificación semanal", view: "outings" })),
+      ...(announcements.error ? [] : announcements.data ?? []).filter((item) => matches(`anuncio ${item.title}`, term)).map((item) => ({ id: `announcement:${item.id}`, type: "announcement", label: item.title, sublabel: "Anuncio", view: "announcements" })),
     ].slice(0, limit) });
   } catch (error) { return fail(error instanceof Error ? error.message : "Error inesperado.", 500); }
 }

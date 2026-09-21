@@ -13,6 +13,26 @@ export function saveAnnouncementDraft(draft: AnnouncementDraft) {
   }
 }
 
+/** Reads the draft without consuming it (safe under React StrictMode's double initializers). */
+export function peekAnnouncementDraft(): AnnouncementDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AnnouncementDraft>;
+    return typeof parsed.title === "string" && typeof parsed.description === "string" ? { title: parsed.title, description: parsed.description } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAnnouncementDraft() {
+  try {
+    window.sessionStorage.removeItem(KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export function takeAnnouncementDraft(): AnnouncementDraft | null {
   try {
     const raw = window.sessionStorage.getItem(KEY);
@@ -31,4 +51,9 @@ export function hasAnnouncementDraft() {
   } catch {
     return false;
   }
+}
+
+/** Lets deep inside a panel ask the page to switch the active view (e.g. rain → Zoom → announcement). */
+export function requestNavigation(view: string) {
+  window.dispatchEvent(new CustomEvent("v2:navigate", { detail: view }));
 }

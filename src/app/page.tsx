@@ -78,7 +78,8 @@ import { S13View } from "@/components/v2/territories/s13-view";
 import { MapView } from "@/components/v2/territories/map-view";
 import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
 import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
-import { saveAnnouncementDraft } from "@/components/v2/announcement-draft";
+import { requestNavigation, saveAnnouncementDraft } from "@/components/v2/announcement-draft";
+import { AnnouncementsPanel } from "@/components/v2/announcements/announcements-panel";
 import { warningsForTerritories, type DoNotVisitItem } from "@/modules/territories/do-not-visit";
 
 type Group = { id: string; name: string; active: boolean };
@@ -412,14 +413,14 @@ export default function Home() {
 
   useEffect(() => {
     const viewByPath: Record<string, string> = {
-      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/mis-salidas": "myOutings", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
+      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/mis-salidas": "myOutings", "/app/anuncios": "announcements", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
     };
     setActiveView(viewByPath[pathname] ?? new URLSearchParams(window.location.search).get("view") ?? "dashboard");
   }, [pathname]);
 
   function changeView(view: string) {
     const pathByView: Record<string, string> = {
-      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", myOutings: "/app/mis-salidas", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
+      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", myOutings: "/app/mis-salidas", announcements: "/app/anuncios", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
     };
     setActiveView(view);
     if (pathByView[view]) window.history.pushState(null, "", pathByView[view]);
@@ -433,6 +434,13 @@ export default function Home() {
     await mutate("createWeeklyOuting", { starts_on: startsOn.toISOString().slice(0, 10) });
     changeView("outings");
   }
+
+  useEffect(() => {
+    // Panels ask for a view switch through this event (e.g. the rain → Zoom flow opens the composer).
+    const onNavigate = (event: Event) => changeView(String((event as CustomEvent).detail));
+    window.addEventListener("v2:navigate", onNavigate);
+    return () => window.removeEventListener("v2:navigate", onNavigate);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -715,6 +723,10 @@ export default function Home() {
         ) : activeView === "territories" && shellAccess.canManageTerritories ? (
           <div className="view-transition min-w-0" key="territories">
             <TerritoriesHub legacy={isAdmin ? <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} /> : null} />
+          </div>
+        ) : activeView === "announcements" ? (
+          <div className="view-transition min-w-0" key="announcements">
+            <AnnouncementsPanel />
           </div>
         ) : activeView === "myOutings" && shellAccess.isConductor ? (
           <div className="view-transition min-w-0" key="myOutings">
@@ -2955,7 +2967,10 @@ function WeeklyOutingSlotCard({
     const result = await mutate(rain ? "switchSlotToZoom" : "setSlotZoom", { id: slot.id, zoom: !slot.is_zoom });
     const announcement = result && typeof result === "object" && "announcement" in result ? (result as { announcement?: { title: string; description: string } | null }).announcement : null;
     // The rain flow ends in an announcement: leave the draft ready for the composer.
-    if (announcement) saveAnnouncementDraft(announcement);
+    if (announcement) {
+      saveAnnouncementDraft(announcement);
+      requestNavigation("announcements");
+    }
   }
 
   return (

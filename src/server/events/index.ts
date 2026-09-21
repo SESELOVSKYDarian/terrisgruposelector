@@ -57,7 +57,7 @@ export type DomainEventPayloads = {
   BUILDING_PROPOSED: { recipientId: string; proposalId: string; title: string };
   BUILDING_CENSUS_CORRECTION: { recipientId: string; correctionId: string; title: string };
   PERSONAL_TERRITORY_REPORT_DUE: { recipientId: string; assignmentId: string; title: string };
-  ANNOUNCEMENT_PUBLISHED: { recipientId: string; announcementId: string; title: string };
+  ANNOUNCEMENT_PUBLISHED: { recipientId: string; announcementId: string; title: string; detail?: string };
 };
 
 export type DomainEventInput<T extends DomainEventType> = {

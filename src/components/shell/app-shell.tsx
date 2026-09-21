@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Keyboard,
   LogOut,
+  Megaphone,
   Menu,
   MonitorSmartphone,
   Moon,
@@ -31,6 +32,7 @@ export type ShellAccess = {
   canManageSystem: boolean;
   canManageTerritories: boolean;
   canViewS13?: boolean;
+  canPublishAnnouncements?: boolean;
   canPlanOutings: boolean;
   canUseReservations: boolean;
   isConductor: boolean;
@@ -41,7 +43,7 @@ type ShellUser = { full_name: string; username: string };
 type NavItem = { id: string; label: string; icon: typeof ShieldCheck; visible?: boolean };
 
 const sectionItems = (access: ShellAccess): { label?: string; items: NavItem[] }[] => [
-  { items: [{ id: "dashboard", label: "Resumen", icon: ShieldCheck }] },
+  { items: [{ id: "dashboard", label: "Resumen", icon: ShieldCheck }, { id: "announcements", label: "Anuncios", icon: Megaphone }] },
   {
     label: "OPERACION",
     items: [

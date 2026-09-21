@@ -2,22 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { CalendarDays, ChevronRight, Command, CornerDownLeft, Hash, Search, UserRound, Users } from "lucide-react";
+import { CalendarDays, ChevronRight, Command, CornerDownLeft, Hash, Megaphone, Search, UserRound, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ShellAccess } from "@/components/shell/app-shell";
 
-type Entry = { id: string; type: "territory" | "user" | "outing"; label: string; sublabel?: string; view: string };
+type Entry = { id: string; type: "territory" | "user" | "outing" | "announcement"; label: string; sublabel?: string; view: string };
 type Item = Entry & { icon: typeof Search; section: "Recientes" | "Acciones" | "Resultados"; onSelect: () => void };
 const recentKey = (userId: string) => `pr-territorios:command-palette:recent:${userId}`;
 
 function isEntry(value: unknown): value is Entry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Partial<Entry>;
-  return typeof entry.id === "string" && typeof entry.label === "string" && typeof entry.view === "string" && (entry.type === "territory" || entry.type === "user" || entry.type === "outing");
+  return typeof entry.id === "string" && typeof entry.label === "string" && typeof entry.view === "string" && (entry.type === "territory" || entry.type === "user" || entry.type === "outing" || entry.type === "announcement");
 }
 function getRecents(userId: string) { try { const value: unknown = JSON.parse(window.localStorage.getItem(recentKey(userId)) ?? "[]"); return Array.isArray(value) ? value.filter(isEntry).slice(0, 6) : []; } catch { return []; } }
 function storeRecent(userId: string, entry: Entry) { try { window.localStorage.setItem(recentKey(userId), JSON.stringify([entry, ...getRecents(userId).filter((item) => item.id !== entry.id)].slice(0, 6))); } catch { /* Recents are optional. */ } }
-function iconFor(type: Entry["type"]) { return type === "territory" ? Hash : type === "user" ? UserRound : CalendarDays; }
+function iconFor(type: Entry["type"]) { return type === "territory" ? Hash : type === "user" ? UserRound : type === "announcement" ? Megaphone : CalendarDays; }
 
 export function CommandPalette({ access, onCreateOuting, onNavigate, open, onOpenChange, userId }: { access: ShellAccess; onCreateOuting?: () => void; onNavigate: (view: string) => void; open: boolean; onOpenChange: (open: boolean) => void; userId: string }) {
   const [query, setQuery] = useState("");
@@ -56,11 +56,11 @@ export function CommandPalette({ access, onCreateOuting, onNavigate, open, onOpe
   const items = useMemo<Item[]>(() => {
     const selectEntry = (entry: Entry) => () => { storeRecent(userId, entry); setRecents(getRecents(userId)); onNavigate(entry.view); onOpenChange(false); setQuery(""); };
     const command = (id: string, label: string, sublabel: string, view: string, icon: typeof Search, type: Entry["type"], action?: () => void): Item => ({ id, label, sublabel, view, icon, type, section: "Acciones", onSelect: () => { action?.(); if (!action) onNavigate(view); onOpenChange(false); } });
-    const commands = [command("command:dashboard", "Ir al resumen", "Inicio", "dashboard", Command, "outing"), ...(access.canManageTerritories ? [command("command:territories", "Ir a Territorios", "Operación", "territories", Hash, "territory")] : []), ...(access.canManageUsers ? [command("command:users", "Ir a Usuarios", "Administración", "users", Users, "user")] : []), ...(access.canPlanOutings ? [command("command:outings", "Ir a Salidas", "Operación", "outings", CalendarDays, "outing")] : []), ...(onCreateOuting ? [command("command:new-outing", "Nueva salida", "Crear la próxima planificación semanal", "outings", CalendarDays, "outing", onCreateOuting)] : [])];
+    const commands = [command("command:dashboard", "Ir al resumen", "Inicio", "dashboard", Command, "outing"), ...(access.canManageTerritories ? [command("command:territories", "Ir a Territorios", "Operación", "territories", Hash, "territory")] : []), ...(access.canManageUsers ? [command("command:users", "Ir a Usuarios", "Administración", "users", Users, "user")] : []), ...(access.canPlanOutings ? [command("command:outings", "Ir a Salidas", "Operación", "outings", CalendarDays, "outing")] : []), ...[command("command:announcements", "Ir a Anuncios", "Inicio", "announcements", Megaphone, "announcement")], ...(access.canPublishAnnouncements ? [command("command:new-announcement", "Nuevo anuncio", "Publicar un aviso para todos", "announcements", Megaphone, "announcement")] : []), ...(onCreateOuting ? [command("command:new-outing", "Nueva salida", "Crear la próxima planificación semanal", "outings", CalendarDays, "outing", onCreateOuting)] : [])];
     const term = query.trim().toLocaleLowerCase();
     const matchingCommands = term ? commands.filter((item) => `${item.label} ${item.sublabel}`.toLocaleLowerCase().includes(term)) : commands;
     const results = entries.map((entry) => ({ ...entry, icon: iconFor(entry.type), section: "Resultados" as const, onSelect: selectEntry(entry) }));
-    const canOpenRecent = (entry: Entry) => entry.type === "territory" ? access.canManageTerritories : entry.type === "user" ? access.canManageUsers : access.canPlanOutings;
+    const canOpenRecent = (entry: Entry) => entry.type === "territory" ? access.canManageTerritories : entry.type === "user" ? access.canManageUsers : entry.type === "announcement" ? true : access.canPlanOutings;
     const recentItems = !term ? recents.filter(canOpenRecent).map((entry) => ({ ...entry, icon: iconFor(entry.type), section: "Recientes" as const, onSelect: selectEntry(entry) })) : [];
     return [...recentItems, ...matchingCommands, ...results];
   }, [access.canManageTerritories, access.canManageUsers, access.canPlanOutings, entries, onCreateOuting, onNavigate, onOpenChange, query, recents, userId]);

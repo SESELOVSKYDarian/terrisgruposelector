@@ -20,6 +20,7 @@ export const permissionNames = [
   "PUBLISH_OUTINGS",
   "MANAGE_TERRITORIES",
   "VIEW_S13",
+  "PUBLISH_ANNOUNCEMENTS",
 ] as const;
 
 export type PermissionName = (typeof permissionNames)[number];
@@ -36,12 +37,14 @@ function permissionsForResponsibilities(responsibilities: readonly Responsibilit
   if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_USERS");
   if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_SYSTEM");
   if (responsibilities.includes("COORDINADOR")) permissions.add("VIEW_S13");
+  if (responsibilities.includes("COORDINADOR")) permissions.add("PUBLISH_ANNOUNCEMENTS");
   if (responsibilities.includes("SIERVO_TERRITORIOS")) {
     permissions.add("PLAN_OUTINGS");
     permissions.add("MANAGE_TERRITORIES");
     permissions.add("VIEW_S13");
   }
   if (responsibilities.includes("SUPERINTENDENTE_SERVICIO")) {
+    permissions.add("PUBLISH_ANNOUNCEMENTS");
     permissions.add("PUBLISH_OUTINGS");
     permissions.add("MANAGE_TERRITORIES");
     permissions.add("VIEW_S13");
@@ -66,6 +69,7 @@ export function navigationAccess(context: FreshPermissionContext) {
     canManageTerritories: hasPermission(context, "MANAGE_TERRITORIES"),
     canPlanOutings: hasPermission(context, "PLAN_OUTINGS") || hasPermission(context, "PUBLISH_OUTINGS"),
     isConductor: context.capabilities.includes("CONDUCTOR"),
+    canPublishAnnouncements: hasPermission(context, "PUBLISH_ANNOUNCEMENTS"),
     canUseReservations:
       context.appointment === "ANCIANO" || context.groupResponsibilities.length > 0,
     hasOperationalResponsibility: [

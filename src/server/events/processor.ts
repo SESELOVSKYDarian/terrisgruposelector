@@ -1,5 +1,5 @@
 export type InternalNotification = { eventId: string; recipientId: string; type: string; title: string; description: string; entityType: string; entityId: string; targetUrl: string };
-export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; windowId?: string; reportId?: string; audience?: "conductor" | "reviewer" } };
+export type InternalEvent = { id: string; event_type: string; payload: { recipientId: string; slotId?: string; slotDate?: string; detail?: string; title?: string; targetUrl?: string; outingId?: string; startsOn?: string; windowId?: string; reportId?: string; announcementId?: string; audience?: "conductor" | "reviewer" } };
 export type InternalEventRepository = { createInternalNotification: (notification: InternalNotification) => Promise<boolean>; recordDelivery: (eventId: string, recipientId: string) => Promise<void> };
 
 const OUTINGS_URL = "/?view=outings";
@@ -37,6 +37,10 @@ export function buildNotification(event: InternalEvent): InternalNotification | 
     if (event.event_type === "OUTING_CANCELLED") {
       return { ...base, ...slot, title: reviewer ? "Salida cancelada" : "Tu salida fue cancelada", description: withDetail(`${reviewer ? "Se canceló una salida" : "Se canceló tu salida"} del ${payload.slotDate}.`, payload.detail) };
     }
+  }
+
+  if (event.event_type === "ANNOUNCEMENT_PUBLISHED" && payload.announcementId && payload.title) {
+    return { ...base, title: payload.title, description: payload.detail ?? payload.title, entityType: "announcement", entityId: payload.announcementId, targetUrl: `/?view=announcements&highlight=${payload.announcementId}` };
   }
 
   if (payload.windowId && payload.title) {
