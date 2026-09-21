@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { formatS13Date, type S13Page } from "@/modules/s13/layout";
 import { cn } from "@/lib/utils";
 import { Card, Empty, Notice, SubTabs } from "../ui";
+import { S13SyncCard, type SyncInfo } from "./s13-sync-card";
 
 type Doc = { code: string; title: string; first_territory: number; last_territory: number };
-type State = { documents: Doc[]; selected: { document: Doc; pages: S13Page[] } | null };
+type State = { documents: Doc[]; selected: { document: Doc; pages: S13Page[] } | null; sync?: SyncInfo | null };
 
 const th = "border border-border px-2 py-1.5 text-center text-xs font-semibold text-muted";
 const td = "border border-border px-2 py-1 text-center text-sm text-foreground";
@@ -17,6 +18,7 @@ export function S13View() {
   const [page, setPage] = useState(1);
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -28,7 +30,7 @@ export function S13View() {
       })
       .catch((cause) => active && setError(cause instanceof Error ? cause.message : "Error inesperado."));
     return () => { active = false; };
-  }, [code]);
+  }, [code, refresh]);
 
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!state) return <Notice>Cargando S-13…</Notice>;
@@ -40,6 +42,7 @@ export function S13View() {
   return (
     <div className="space-y-4">
       <SubTabs onChange={(next) => { setCode(next); setPage(1); }} tabs={state.documents.map((entry) => ({ id: entry.code, label: entry.title }))} value={document.code} />
+      {state.sync ? <S13SyncCard code={document.code} key={`${document.code}:${state.sync.mode}:${state.sync.staging_document_id}:${state.sync.external_document_id}`} onChanged={() => setRefresh((value) => value + 1)} sync={state.sync} /> : null}
       <Card title={document.title} description="Se genera desde las vueltas registradas: la base de datos es la fuente de verdad y este documento es solo su representación.">
         {pages.length > 1 ? <SubTabs onChange={(next) => setPage(Number(next))} tabs={pages.map((entry) => ({ id: String(entry.page), label: `Página ${entry.page}` }))} value={String(current?.page ?? 1)} /> : null}
         {current ? (

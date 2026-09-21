@@ -19,6 +19,7 @@
     "src/modules/territories/names.ts",
     "src/modules/territories/do-not-visit.ts",
     "src/modules/s13/layout.ts",
+    "src/modules/s13/sync.ts",
     "src/modules/map/geometry.ts",
     "src/modules/telephone/assignment.ts",
     "src/modules/buildings/structure.ts",
