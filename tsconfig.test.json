@@ -17,6 +17,7 @@
     "src/modules/groups/group-outings.ts",
     "src/modules/territories/rounds.ts",
     "src/modules/territories/names.ts",
+    "src/modules/s13/layout.ts",
     "src/server/events/processor.ts",
     "src/server/scheduler/reminders.ts"
   ]

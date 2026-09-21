@@ -19,6 +19,7 @@ export const permissionNames = [
   "PLAN_OUTINGS",
   "PUBLISH_OUTINGS",
   "MANAGE_TERRITORIES",
+  "VIEW_S13",
 ] as const;
 
 export type PermissionName = (typeof permissionNames)[number];
@@ -34,11 +35,17 @@ function permissionsForResponsibilities(responsibilities: readonly Responsibilit
   const permissions = new Set<PermissionName>();
   if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_USERS");
   if (responsibilities.includes("COORDINADOR")) permissions.add("MANAGE_SYSTEM");
+  if (responsibilities.includes("COORDINADOR")) permissions.add("VIEW_S13");
   if (responsibilities.includes("SIERVO_TERRITORIOS")) {
     permissions.add("PLAN_OUTINGS");
     permissions.add("MANAGE_TERRITORIES");
+    permissions.add("VIEW_S13");
   }
-  if (responsibilities.includes("SUPERINTENDENTE_SERVICIO")) permissions.add("PUBLISH_OUTINGS");
+  if (responsibilities.includes("SUPERINTENDENTE_SERVICIO")) {
+    permissions.add("PUBLISH_OUTINGS");
+    permissions.add("MANAGE_TERRITORIES");
+    permissions.add("VIEW_S13");
+  }
   return permissions;
 }
 

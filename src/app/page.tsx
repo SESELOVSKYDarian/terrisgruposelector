@@ -73,6 +73,7 @@ import { SubTabs } from "@/components/v2/ui";
 import { RecurringConductorsPanel } from "@/components/v2/outings/recurring-conductors-panel";
 import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
 import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
+import { S13View } from "@/components/v2/territories/s13-view";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -702,6 +703,10 @@ export default function Home() {
           <div className="view-transition min-w-0" key="outings">
             <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />
           </div>
+        ) : activeView === "territories" && shellAccess.canManageTerritories ? (
+          <div className="view-transition min-w-0" key="territories">
+            <TerritoriesHub legacy={isAdmin ? <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} /> : null} />
+          </div>
         ) : activeView === "myOutings" && shellAccess.isConductor ? (
           <div className="view-transition min-w-0" key="myOutings">
             <MyOutingsPanel />
@@ -837,6 +842,18 @@ export default function Home() {
         onConfirm={() => resolveConfirmation(true)}
       />
     </main>
+  );
+}
+
+/** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
+function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "s13" as const, label: "S-13" }];
+  const [tab, setTab] = useState<"list" | "s13">(tabs[0].id);
+  return (
+    <div className="space-y-4">
+      <SubTabs onChange={setTab} tabs={tabs} value={tab} />
+      {tab === "list" && legacy ? legacy : <S13View />}
+    </div>
   );
 }
 

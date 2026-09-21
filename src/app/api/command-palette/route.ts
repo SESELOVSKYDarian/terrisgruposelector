@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createAdminSupabaseClient, getCurrentProfile } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
 import { getPlanningAuthority } from "@/server/outings/planning";
+import { getTerritoryAccess } from "@/server/territories/access";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     if (!permissions) return fail("No autorizado.", 403);
     const term = (request.nextUrl.searchParams.get("q") ?? "").trim().toLocaleLowerCase();
     const supabase = createAdminSupabaseClient();
-    const canTerritories = hasPermission(permissions, "MANAGE_TERRITORIES");
+    const canTerritories = (await getTerritoryAccess(profile)).canManage;
     const canUsers = hasPermission(permissions, "MANAGE_USERS");
     const planning = await getPlanningAuthority(profile);
     const canOutings = planning.canPlan || planning.canPublish;

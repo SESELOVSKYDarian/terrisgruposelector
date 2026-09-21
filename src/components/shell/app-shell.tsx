@@ -30,6 +30,7 @@ export type ShellAccess = {
   canManageUsers: boolean;
   canManageSystem: boolean;
   canManageTerritories: boolean;
+  canViewS13?: boolean;
   canPlanOutings: boolean;
   canUseReservations: boolean;
   isConductor: boolean;
