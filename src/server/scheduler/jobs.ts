@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { formatDateEs } from "@/modules/outings/time";
 import { emitDomainEvent } from "@/server/events";
 import { runGroupWindowReminders } from "@/server/groups/group-outings";
+import { runPersonalTerritoryReminders } from "@/server/personal";
 import type { AdminSupabase } from "@/server/outings/planning";
 import { initialDriverReportDeadline, runDriverReportReminders, runReminderJobs, weekendReminderDueAt, type DriverReportReminderCandidate } from "./reminders";
 
@@ -83,6 +84,7 @@ export async function runAllReminderJobs(now = new Date()) {
     groupWindows: await guarded("groupWindows", () => runGroupWindowReminders(supabase, now)),
     driverReport: await guarded("driverReport", () => runDriverReportJob(supabase, now)),
     weekend: await guarded("weekend", () => runWeekendReminderJob(supabase, now)),
+    personalTerritory: await guarded("personalTerritory", () => runPersonalTerritoryReminders(supabase, now)),
   };
   return { ...base, emitted: base.emitted + Object.values(jobs).reduce((total, job) => total + job.emitted, 0), jobs };
 }

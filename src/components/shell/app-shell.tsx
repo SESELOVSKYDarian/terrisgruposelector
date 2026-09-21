@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Keyboard,
   LogOut,
+  MapPin,
   Megaphone,
   Menu,
   MonitorSmartphone,
@@ -33,6 +34,7 @@ export type ShellAccess = {
   canManageTerritories: boolean;
   canViewS13?: boolean;
   canPublishAnnouncements?: boolean;
+  hasPersonalTerritory?: boolean;
   canPlanOutings: boolean;
   canUseReservations: boolean;
   isConductor: boolean;
@@ -49,6 +51,7 @@ const sectionItems = (access: ShellAccess): { label?: string; items: NavItem[] }
     items: [
       { id: "outings", label: "Salidas", icon: CalendarDays },
       { id: "myOutings", label: "Mis salidas", icon: ClipboardList, visible: access.isConductor },
+      { id: "personalTerritory", label: "Mi territorio", icon: MapPin, visible: access.hasPersonalTerritory },
       { id: "territories", label: "Territorios", icon: SlidersHorizontal, visible: access.canManageTerritories },
       { id: "reservations", label: "Reservas", icon: CalendarDays, visible: access.canUseReservations },
     ],

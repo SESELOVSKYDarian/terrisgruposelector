@@ -43,3 +43,17 @@ export async function recomputeRound(supabase: AdminSupabase, roundId: string, o
   const { error: updateError } = await supabase.from("territory_rounds").update({ ...summary, updated_at: new Date().toISOString() }).eq("id", roundId);
   return updateError?.message ?? null;
 }
+
+/** The territory's open round, created (with this conductor as "asignado a") when none is open. */
+export async function openOrCreateRound(supabase: AdminSupabase, territoryId: string, conductorId: string, assignedOn: string) {
+  const open = async () => (await supabase.from("territory_rounds").select("id").eq("territory_id", territoryId).is("completed_on", null).maybeSingle()).data?.id as string | undefined;
+  const existing = await open();
+  if (existing) return existing;
+  const { data, error } = await supabase.from("territory_rounds").insert({ territory_id: territoryId, conductor_id: conductorId, assigned_on: assignedOn, completed_on: null, pending_block_labels: [], done_block_labels: [] }).select("id").single();
+  if (error?.code === "23505") {
+    const raced = await open();
+    if (raced) return raced;
+  }
+  if (error || !data) throw new Error(error?.message ?? "No se pudo abrir la vuelta.");
+  return data.id as string;
+}

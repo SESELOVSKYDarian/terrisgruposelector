@@ -20,6 +20,7 @@ export const domainEventTypes = [
   "VISIT_REPORT_SUBMITTED",
   "BUILDING_PROPOSED",
   "BUILDING_CENSUS_CORRECTION",
+  "PERSONAL_TERRITORY_ASSIGNED",
   "PERSONAL_TERRITORY_REPORT_DUE",
   "ANNOUNCEMENT_PUBLISHED",
 ] as const;
@@ -56,6 +57,7 @@ export type DomainEventPayloads = {
   VISIT_REPORT_SUBMITTED: { recipientId: string; reportId: string; title: string; targetUrl?: string };
   BUILDING_PROPOSED: { recipientId: string; proposalId: string; title: string };
   BUILDING_CENSUS_CORRECTION: { recipientId: string; correctionId: string; title: string };
+  PERSONAL_TERRITORY_ASSIGNED: { recipientId: string; assignmentId: string; title: string };
   PERSONAL_TERRITORY_REPORT_DUE: { recipientId: string; assignmentId: string; title: string };
   ANNOUNCEMENT_PUBLISHED: { recipientId: string; announcementId: string; title: string; detail?: string };
 };

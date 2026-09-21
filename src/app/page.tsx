@@ -79,6 +79,7 @@ import { MapView } from "@/components/v2/territories/map-view";
 import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
 import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
 import { BuildingsBrowser } from "@/components/v2/buildings/buildings-browser";
+import { PersonalAssignmentsManager, PersonalTerritoryPanel } from "@/components/v2/personal/personal-territory-panel";
 import { clearTab, peekTab } from "@/components/v2/highlight";
 import { requestNavigation, saveAnnouncementDraft } from "@/components/v2/announcement-draft";
 import { AnnouncementsPanel } from "@/components/v2/announcements/announcements-panel";
@@ -415,14 +416,14 @@ export default function Home() {
 
   useEffect(() => {
     const viewByPath: Record<string, string> = {
-      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/mis-salidas": "myOutings", "/app/anuncios": "announcements", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
+      "/app": "dashboard", "/app/salidas": "outings", "/app/territorios": "territories", "/app/reservas": "reservations", "/app/mis-salidas": "myOutings", "/app/anuncios": "announcements", "/app/mi-territorio": "personalTerritory", "/app/usuarios": "users", "/app/ajustes": "settings", "/app/cuenta": "account",
     };
     setActiveView(viewByPath[pathname] ?? new URLSearchParams(window.location.search).get("view") ?? "dashboard");
   }, [pathname]);
 
   function changeView(view: string) {
     const pathByView: Record<string, string> = {
-      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", myOutings: "/app/mis-salidas", announcements: "/app/anuncios", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
+      dashboard: "/app", outings: "/app/salidas", territories: "/app/territorios", reservations: "/app/reservas", myOutings: "/app/mis-salidas", announcements: "/app/anuncios", personalTerritory: "/app/mi-territorio", users: "/app/usuarios", settings: "/app/ajustes", account: "/app/cuenta",
     };
     setActiveView(view);
     if (pathByView[view]) window.history.pushState(null, "", pathByView[view]);
@@ -726,6 +727,10 @@ export default function Home() {
           <div className="view-transition min-w-0" key="territories">
             <TerritoriesHub legacy={isAdmin ? <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} /> : null} />
           </div>
+        ) : activeView === "personalTerritory" && shellAccess.hasPersonalTerritory ? (
+          <div className="view-transition min-w-0" key="personalTerritory">
+            <PersonalTerritoryPanel />
+          </div>
         ) : activeView === "announcements" ? (
           <div className="view-transition min-w-0" key="announcements">
             <AnnouncementsPanel />
@@ -870,8 +875,8 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "dnv" as const, label: "No visitar" }];
-  const [tab, setTab] = useState<"list" | "map" | "s13" | "buildings" | "phone" | "dnv">(() => {
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "personal" as const, label: "Personales" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "map" | "s13" | "buildings" | "phone" | "personal" | "dnv">(() => {
     const requested = peekTab("territories");
     return tabs.find((entry) => entry.id === requested)?.id ?? tabs[0].id;
   });
@@ -879,7 +884,7 @@ function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : tab === "personal" ? <PersonalAssignmentsManager /> : <S13View />}
     </div>
   );
 }

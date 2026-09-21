@@ -38,6 +38,9 @@ export async function getBuildingAccess(supabase: AdminSupabase, profile: Sessio
     if ((week?.status ?? "PUBLISHED") !== "PUBLISHED") continue;
     ids.add(row.territory_id as string);
   }
+  // A personal "Edificios" assignment also opens that territory's buildings (pre-migration: ignored).
+  const personal = await supabase.from("personal_territory_assignments").select("territory_id").eq("profile_id", profile.id).eq("status", "ACTIVE").eq("mode", "EDIFICIOS");
+  if (!personal.error) for (const row of personal.data ?? []) ids.add(row.territory_id as string);
   return { canManage: false, territoryIds: ids };
 }
 

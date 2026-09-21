@@ -8,7 +8,7 @@ import { formatConductorName } from "@/modules/territories/names";
 import type { PlanningAuthority } from "@/modules/outings/workflow";
 import { ApiError, forbid } from "@/server/api";
 import { initialDriverReportDeadline } from "@/server/scheduler/reminders";
-import { recomputeRound, territoryLabels } from "@/server/territories/rounds";
+import { openOrCreateRound, recomputeRound, territoryLabels } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { loadPhoneBlocks } from "@/server/telephone";
 import { loadWeek, resolvePlannerIds, safeEmit, writeAudit, type AdminSupabase } from "./planning";
@@ -274,17 +274,3 @@ export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
   }
   return { id: reportId, created };
 }
-
-async function openOrCreateRound(supabase: AdminSupabase, territoryId: string, conductorId: string, assignedOn: string) {
-  const open = async () => (await supabase.from("territory_rounds").select("id").eq("territory_id", territoryId).is("completed_on", null).maybeSingle()).data?.id as string | undefined;
-  const existing = await open();
-  if (existing) return existing;
-  const { data, error } = await supabase.from("territory_rounds").insert({ territory_id: territoryId, conductor_id: conductorId, assigned_on: assignedOn, completed_on: null, pending_block_labels: [], done_block_labels: [] }).select("id").single();
-  if (error?.code === "23505") {
-    const raced = await open();
-    if (raced) return raced;
-  }
-  if (error || !data) throw new Error(error?.message ?? "No se pudo abrir la vuelta.");
-  return data.id as string;
-}
-
