@@ -74,6 +74,7 @@ import { RecurringConductorsPanel } from "@/components/v2/outings/recurring-cond
 import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
 import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
 import { S13View } from "@/components/v2/territories/s13-view";
+import { MapView } from "@/components/v2/territories/map-view";
 
 type Group = { id: string; name: string; active: boolean };
 type Profile = {
@@ -847,12 +848,12 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "s13" as const, label: "S-13" }];
-  const [tab, setTab] = useState<"list" | "s13">(tabs[0].id);
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }];
+  const [tab, setTab] = useState<"list" | "map" | "s13">(tabs[0].id);
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : <S13View />}
     </div>
   );
 }
