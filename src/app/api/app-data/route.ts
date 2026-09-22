@@ -12,9 +12,19 @@ import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
 import { recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
-import { blockStatuses, reservationStatuses, roles } from "@/lib/domain";
+import { blockStatuses, reservationStatuses, roles, type Role } from "@/lib/domain";
 
 export const runtime = "nodejs";
+
+/**
+ * `profiles.role` is a legacy single-value column: the V2 nombramiento-backfill trigger reads it
+ * on insert to seed profile_appointments, so it has to reflect what was actually checked instead
+ * of defaulting to ANCIANO for anyone who isn't admin (that silently turned every Conductor-only
+ * or Publicador-only signup into an Anciano in the V2 permission model).
+ */
+function primaryLegacyRole(selectedRoles: Role[]): Role {
+  return (["ADMIN", "ANCIANO", "CONDUCTOR", "PUBLICADOR"] as const).find((role) => selectedRoles.includes(role)) ?? "PUBLICADOR";
+}
 
 const reservationBaseSchema = z.object({
   reservation_window_id: z.string().uuid(),
@@ -872,7 +882,7 @@ export async function POST(request: Request) {
         full_name: String(payload?.full_name ?? "").trim(),
         email: payload?.email ? String(payload.email).trim().toLowerCase() : null,
         group_id: payload?.group_id ? String(payload.group_id) : null,
-        role: validRoles.includes("ADMIN") ? "ADMIN" : "ANCIANO",
+        role: primaryLegacyRole(validRoles as Role[]),
         active: true,
         password_hash: hashPassword(temporaryPassword),
         must_change_password: true,
@@ -913,7 +923,7 @@ export async function POST(request: Request) {
         const requestedRoles = Array.isArray(payload.roles) ? payload.roles.map((role) => String(role)) : [];
         const validRoles = requestedRoles.filter((role) => roles.includes(role as never));
         if (!validRoles.length) return fail("Selecciona al menos un rol.", 422);
-        patch.role = validRoles.includes("ADMIN") ? "ADMIN" : "ANCIANO";
+        patch.role = primaryLegacyRole(validRoles as Role[]);
 
         const { error: deleteError } = await supabase.from("profile_roles").delete().eq("profile_id", String(payload?.id));
         if (deleteError) return fail(deleteError.message);
