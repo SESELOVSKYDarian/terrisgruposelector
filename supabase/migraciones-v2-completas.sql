@@ -406,6 +406,11 @@ set v2_permissions_backfilled_at = coalesce(v2_permissions_backfilled_at, now())
     v2_permissions_backfill_source = coalesce(v2_permissions_backfill_source, 'fase-1-legacy-roles')
 where v2_permissions_backfilled_at is null;
 
+-- The backfill above queued deferred constraint-trigger events on profile_appointments/profiles
+-- (enforce_v2_*_appointment_count). Firing them now clears the queue so the ALTER TABLE calls below
+-- are allowed in this same transaction (Postgres refuses to ALTER a table with pending trigger events).
+set constraints all immediate;
+
 alter table public.profile_appointments enable row level security;
 alter table public.profile_capabilities enable row level security;
 alter table public.profile_responsibilities enable row level security;
