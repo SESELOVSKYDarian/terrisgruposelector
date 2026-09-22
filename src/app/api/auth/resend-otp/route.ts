@@ -16,7 +16,12 @@ export async function POST() {
   if (error || !profile?.email) return fail("No se pudo reenviar el codigo.", 400);
 
   const code = generateOtpCode();
-  await sendMail(profile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+  try {
+    await sendMail(profile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+  } catch (cause) {
+    console.error("No se pudo reenviar el código de verificación:", cause);
+    return fail("No se pudo reenviar el código de verificación. Probá de nuevo en un momento.", 502);
+  }
   const pendingToken = createOtpPendingToken(profileId, code);
   cookieStore.set(otpPendingCookieName, pendingToken, {
     httpOnly: true,

@@ -64,16 +64,21 @@ export function AppShell({
   access,
   activeView,
   children,
+  impersonating,
   onChange,
   onCreateOuting,
+  onEndImpersonation,
   onLogout,
   user,
 }: {
   access: ShellAccess;
   activeView: string;
   children: React.ReactNode;
+  /** Set while an admin is viewing the app as this profile: who the admin actually is. */
+  impersonating?: { id: string; full_name: string } | null;
   onChange: (view: string) => void;
   onCreateOuting?: () => void;
+  onEndImpersonation?: () => void;
   onLogout: () => void;
   user: ShellUser;
 }) {
@@ -123,6 +128,12 @@ export function AppShell({
     <div className="min-w-0 flex-1 pb-18 lg:pb-0">
       <div className="flex h-14 items-center border-b border-border bg-background-soft px-3 lg:hidden"><button className="shell-icon-button" onClick={() => setMobileOpen(true)} type="button" aria-label="Abrir menú"><Menu size={20} /></button><span className="ml-3 text-sm font-semibold">PR Territorios</span></div>
       <PushPermissionPrompt userId={user.username} />
+      {impersonating ? (
+        <div className="sticky top-0 z-30 flex flex-wrap items-center justify-center gap-2 bg-amber-500 px-3 py-2 text-center text-sm font-medium text-amber-950">
+          <ShieldCheck size={16} /> Estás viendo la cuenta de <strong>{user.full_name}</strong> como {impersonating.full_name}.
+          <button className="ml-1 underline underline-offset-2" onClick={onEndImpersonation} type="button">Volver a mi cuenta</button>
+        </div>
+      ) : null}
       {children}
     </div>
     <nav className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-center justify-around border-t border-border bg-background-soft px-2 lg:hidden" aria-label="Navegación rápida">

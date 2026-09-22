@@ -20,6 +20,8 @@ type SessionPayload = {
   username: string;
   roles: Role[];
   exp: number;
+  /** Set only while an admin is impersonating this profile: the admin's own profile id. */
+  actorId?: string;
 };
 
 const sessionCookieName = "terris_session";
@@ -96,13 +98,14 @@ function decodeSession(token?: string): SessionPayload | null {
   return payload;
 }
 
-export async function setSessionCookie(profile: SessionProfile) {
+export async function setSessionCookie(profile: SessionProfile, actorId?: string) {
   const cookieStore = await cookies();
   const token = encodeSession({
     profileId: profile.id,
     username: profile.username,
     roles: profile.roles,
     exp: Date.now() + sessionMaxAgeSeconds * 1000,
+    ...(actorId ? { actorId } : {}),
   });
 
   cookieStore.set(sessionCookieName, token, {
@@ -117,6 +120,13 @@ export async function setSessionCookie(profile: SessionProfile) {
 export async function clearSessionCookie() {
   const cookieStore = await cookies();
   cookieStore.delete(sessionCookieName);
+}
+
+/** The admin's own profile id while the current session is an impersonation, else null. */
+export async function getImpersonationActorId() {
+  const cookieStore = await cookies();
+  const payload = decodeSession(cookieStore.get(sessionCookieName)?.value);
+  return payload?.actorId ?? null;
 }
 
 export async function getCurrentProfile() {

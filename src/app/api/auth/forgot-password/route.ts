@@ -18,7 +18,12 @@ export async function POST(request: Request) {
       const token = createResetToken(profile.id);
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
       const link = `${appUrl}/reset-password?token=${token}`;
-      await sendMail(profile.email, "Restablecer tu contraseña", resetPasswordEmailHtml(link));
+      try {
+        await sendMail(profile.email, "Restablecer tu contraseña", resetPasswordEmailHtml(link));
+      } catch (cause) {
+        // Never leak send failures to the caller: doing so would reveal whether the account exists.
+        console.error("No se pudo enviar el correo de restablecimiento:", cause);
+      }
     }
   }
 

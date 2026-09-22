@@ -110,7 +110,12 @@ export async function POST(request: Request) {
   }
 
   const code = generateOtpCode();
-  await sendMail(existingProfile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+  try {
+    await sendMail(existingProfile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+  } catch (cause) {
+    console.error("No se pudo enviar el código de verificación (login):", cause);
+    return fail("No se pudo enviar el código de verificación. Probá de nuevo en un momento.", 502);
+  }
   const pendingToken = createOtpPendingToken(profile.id, code);
   cookieStore.set(otpPendingCookieName, pendingToken, {
     httpOnly: true,

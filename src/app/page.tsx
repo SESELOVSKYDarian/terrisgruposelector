@@ -18,6 +18,7 @@ import {
   Grid3X3,
   KeyRound,
   Loader2,
+  LogIn,
   LogOut,
   Map as MapIcon,
   MapPin,
@@ -372,6 +373,7 @@ export default function Home() {
     isConductor: false,
     hasOperationalResponsibility: false,
   });
+  const [impersonating, setImpersonating] = useState<{ id: string; full_name: string } | null>(null);
 
   useEffect(() => {
     setHasPasskeyHint(document.cookie.includes("terris_has_passkey=1"));
@@ -397,10 +399,12 @@ export default function Home() {
       try {
         const navigation = await requestJson("/api/auth/navigation");
         setShellAccess(navigation.access as ShellAccess);
+        setImpersonating(navigation.impersonating ?? null);
       } catch {
         // The shell stays safely minimal if the permission migration has not
         // been applied yet; authorization never falls back to client roles.
         setShellAccess({ canManageUsers: false, canManageSystem: false, canManageTerritories: false, canPlanOutings: false, canUseReservations: false, isConductor: false, hasOperationalResponsibility: false });
+        setImpersonating(null);
       }
       setLoadedAt(Date.now());
     } catch (error) {
@@ -611,6 +615,26 @@ export default function Home() {
     }
   }
 
+  /** "Entrar como": admin support/QA tool. Never touches a password — the server issues the target's
+   * session directly and remembers who asked, so "volver a mi cuenta" needs no credentials either. */
+  async function impersonate(profileId: string) {
+    try {
+      await requestJson("/api/auth/impersonate", { method: "POST", body: JSON.stringify({ action: "start", payload: { profileId } }) });
+      window.location.href = "/";
+    } catch (error) {
+      setToast({ type: "error", text: error instanceof Error ? error.message : "No se pudo entrar como ese usuario." });
+    }
+  }
+
+  async function endImpersonation() {
+    try {
+      await requestJson("/api/auth/impersonate", { method: "POST", body: JSON.stringify({ action: "end" }) });
+      window.location.href = "/";
+    } catch (error) {
+      setToast({ type: "error", text: error instanceof Error ? error.message : "No se pudo volver a tu cuenta." });
+    }
+  }
+
   function submitFromForm(
     event: FormEvent<HTMLFormElement>,
     action: string,
@@ -716,7 +740,7 @@ export default function Home() {
     <main className="relative z-10 min-h-screen text-foreground">
       <SmoothCursor />
       <Toast toast={toast} onClose={() => setToast(null)} />
-      <AppShell access={shellAccess} activeView={activeView} onChange={changeView} onCreateOuting={isPlanner ? () => void createOutingFromPalette() : undefined} onLogout={logout} user={profile}>
+      <AppShell access={shellAccess} activeView={activeView} impersonating={impersonating} onChange={changeView} onCreateOuting={isPlanner ? () => void createOutingFromPalette() : undefined} onEndImpersonation={() => void endImpersonation()} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
           <PersonalSettings person={{ full_name: profile.full_name, username: profile.username, email: profile.email, roles: profile.roles }} view={activeView} />
@@ -749,7 +773,7 @@ export default function Home() {
             <ReservationsHub
               legacy={
                 isAdmin ? (
-                  <AdminView activeView="reservations" data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} mutate={mutate} />
+                  <AdminView activeView="reservations" data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} mutate={mutate} onImpersonate={impersonate} />
                 ) : isAnciano ? (
                   <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
                 ) : null
@@ -765,6 +789,7 @@ export default function Home() {
               openRound={openRound}
               setModal={setModal}
               mutate={mutate}
+              onImpersonate={impersonate}
             />
           </div>
         ) : isAnciano && isConductor ? (
@@ -1010,6 +1035,7 @@ function AdminView({
   openRound,
   setModal,
   mutate,
+  onImpersonate,
 }: {
   activeView: string;
   data: AppData;
@@ -1017,6 +1043,7 @@ function AdminView({
   openRound?: Round;
   setModal: (modal: ModalState) => void;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
+  onImpersonate: (profileId: string) => Promise<void>;
 }) {
   if (activeView === "dashboard") {
     return <AdminDashboard data={data} />;
@@ -1067,7 +1094,7 @@ function AdminView({
   }
 
   if (activeView === "users") {
-    return <UsersPanel data={data} mutate={mutate} setModal={setModal} />;
+    return <UsersPanel data={data} mutate={mutate} setModal={setModal} onImpersonate={onImpersonate} />;
   }
 
   if (activeView === "settings") {
@@ -1313,10 +1340,12 @@ function UsersPanel({
   data,
   mutate,
   setModal,
+  onImpersonate,
 }: {
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
   setModal: (modal: ModalState) => void;
+  onImpersonate: (profileId: string) => Promise<void>;
 }) {
   const pendingProfiles = data.profiles.filter((item) => item.approval_status === "pending");
   const approvedProfiles = data.profiles.filter((item) => item.approval_status !== "pending");
@@ -1379,7 +1408,7 @@ function UsersPanel({
               </Cell>
               <Cell>{item.active ? "Si" : "No"}</Cell>
               <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.id !== data.profile.id ? <IconButton label="Entrar como este usuario" onClick={() => void onImpersonate(item.id)}><LogIn size={16} /></IconButton> : null}{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
             </tr>
           ))}
         </DataTable>
