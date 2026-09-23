@@ -260,6 +260,21 @@ export function verifyResetToken(token: string) {
   return verifyGenericPayload<ResetPayload>(token)?.profileId ?? null;
 }
 
+/**
+ * "Iniciar sesión" link sent alongside the OTP code: same trust model (possession of the inbox),
+ * same 10-minute window, but its own token so clicking it doesn't require the pending-login cookie
+ * to still be around (the link may be opened on a different device than the one that logged in).
+ */
+type MagicLoginPayload = { profileId: string };
+
+export function createMagicLoginToken(profileId: string) {
+  return signGenericPayload<MagicLoginPayload>({ profileId }, otpTtlMs);
+}
+
+export function verifyMagicLoginToken(token: string) {
+  return verifyGenericPayload<MagicLoginPayload>(token)?.profileId ?? null;
+}
+
 type WebauthnChallengePayload = { challenge: string; profileId?: string };
 
 export function createWebauthnChallengeToken(challenge: string, profileId?: string) {

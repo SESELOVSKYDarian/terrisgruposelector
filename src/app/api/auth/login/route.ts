@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
   createAdminSupabaseClient,
+  createMagicLoginToken,
   createOtpPendingToken,
   generateOtpCode,
   hashPassword,
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
 
   const code = generateOtpCode();
   try {
-    await sendMail(existingProfile.email, "Tu codigo de verificacion", otpEmailHtml(code));
+    await sendMail(existingProfile.email, "Tu codigo de verificacion", otpEmailHtml(code, createMagicLoginToken(profile.id)));
   } catch (cause) {
     console.error("No se pudo enviar el código de verificación (login):", cause);
     return fail("No se pudo enviar el código de verificación. Probá de nuevo en un momento.", 502);
