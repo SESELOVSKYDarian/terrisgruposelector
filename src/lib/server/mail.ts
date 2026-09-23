@@ -22,7 +22,16 @@ function getSmtpTransport() {
   if (!host || !user || !pass) throw new Error("Faltan SMTP_HOST, SMTP_USER o SMTP_PASSWORD.");
   if (!smtpTransport) {
     const port = Number(process.env.SMTP_PORT ?? 587);
-    smtpTransport = createTransport({ host, port, secure: process.env.SMTP_SECURE === "true" || port === 465, auth: { user, pass } });
+    smtpTransport = createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === "true" || port === 465,
+      auth: { user, pass },
+      // Temporary: some hosting mail servers run with an expired/self-signed cert. Skipping
+      // verification means the connection is no longer protected against impersonation, so this
+      // is meant only until the host renews it — never the default, always opt-in.
+      tls: process.env.SMTP_ALLOW_INVALID_CERT === "true" ? { rejectUnauthorized: false } : undefined,
+    });
   }
   return smtpTransport;
 }
