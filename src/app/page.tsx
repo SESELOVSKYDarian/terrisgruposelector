@@ -85,6 +85,7 @@ import { SystemSettings } from "@/components/v2/settings/system-settings";
 import { clearTab, peekTab } from "@/components/v2/highlight";
 import { requestNavigation, saveAnnouncementDraft } from "@/components/v2/announcement-draft";
 import { AnnouncementsPanel } from "@/components/v2/announcements/announcements-panel";
+import { UserPermissionsModal } from "@/components/v2/users/user-permissions-modal";
 import { warningsForTerritories, type DoNotVisitItem } from "@/modules/territories/do-not-visit";
 
 type Group = { id: string; name: string; active: boolean };
@@ -773,7 +774,7 @@ export default function Home() {
             <ReservationsHub
               legacy={
                 isAdmin ? (
-                  <AdminView activeView="reservations" data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} mutate={mutate} onImpersonate={impersonate} />
+                  <AdminView activeView="reservations" data={data} loadedAt={loadedAt} openRound={openRound} setModal={setModal} mutate={mutate} onImpersonate={impersonate} onRefresh={() => void loadData()} />
                 ) : isAnciano ? (
                   <ElderReservations data={data} loadedAt={loadedAt} setModal={setModal} mutate={mutate} />
                 ) : null
@@ -790,6 +791,7 @@ export default function Home() {
               setModal={setModal}
               mutate={mutate}
               onImpersonate={impersonate}
+              onRefresh={() => void loadData()}
             />
           </div>
         ) : isAnciano && isConductor ? (
@@ -1036,6 +1038,7 @@ function AdminView({
   setModal,
   mutate,
   onImpersonate,
+  onRefresh,
 }: {
   activeView: string;
   data: AppData;
@@ -1044,6 +1047,7 @@ function AdminView({
   setModal: (modal: ModalState) => void;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
   onImpersonate: (profileId: string) => Promise<void>;
+  onRefresh: () => void;
 }) {
   if (activeView === "dashboard") {
     return <AdminDashboard data={data} />;
@@ -1094,7 +1098,7 @@ function AdminView({
   }
 
   if (activeView === "users") {
-    return <UsersPanel data={data} mutate={mutate} setModal={setModal} onImpersonate={onImpersonate} />;
+    return <UsersPanel data={data} mutate={mutate} setModal={setModal} onImpersonate={onImpersonate} onRefresh={onRefresh} />;
   }
 
   if (activeView === "settings") {
@@ -1341,14 +1345,17 @@ function UsersPanel({
   mutate,
   setModal,
   onImpersonate,
+  onRefresh,
 }: {
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
   setModal: (modal: ModalState) => void;
   onImpersonate: (profileId: string) => Promise<void>;
+  onRefresh: () => void;
 }) {
   const pendingProfiles = data.profiles.filter((item) => item.approval_status === "pending");
   const approvedProfiles = data.profiles.filter((item) => item.approval_status !== "pending");
+  const [permissionsProfile, setPermissionsProfile] = useState<Profile | null>(null);
 
   const pendingControls = useListControls({
     items: pendingProfiles,
@@ -1408,12 +1415,15 @@ function UsersPanel({
               </Cell>
               <Cell>{item.active ? "Si" : "No"}</Cell>
               <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.id !== data.profile.id ? <IconButton label="Entrar como este usuario" onClick={() => void onImpersonate(item.id)}><LogIn size={16} /></IconButton> : null}{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Permisos (condición, características, responsabilidades)" onClick={() => setPermissionsProfile(item)}><ShieldCheck size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.id !== data.profile.id ? <IconButton label="Entrar como este usuario" onClick={() => void onImpersonate(item.id)}><LogIn size={16} /></IconButton> : null}{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
             </tr>
           ))}
         </DataTable>
         <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
       </Panel>
+      {permissionsProfile ? (
+        <UserPermissionsModal groups={data.groups} onClose={() => setPermissionsProfile(null)} onSaved={onRefresh} profile={permissionsProfile} />
+      ) : null}
     </div>
   );
 }
