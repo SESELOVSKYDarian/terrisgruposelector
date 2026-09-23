@@ -14,6 +14,8 @@
     "src/modules/outings/time.ts",
     "src/modules/outings/workflow.ts",
     "src/modules/outings/recurring.ts",
+    "src/modules/outings/suggestions.ts",
+    "src/modules/outings/reported.ts",
     "src/modules/groups/group-outings.ts",
     "src/modules/territories/rounds.ts",
     "src/modules/territories/names.ts",

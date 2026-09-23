@@ -10,7 +10,8 @@ import {
 import { fail, ok } from "@/lib/server/responses";
 import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
-import { normalizePointKind } from "@/modules/outings/suggestions";
+import { lastOccurrences, normalizePointKind } from "@/modules/outings/suggestions";
+import { loadReportedOutings } from "@/server/outings/history";
 import { recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
@@ -243,6 +244,7 @@ export async function GET() {
       departurePointsResult,
       weekendRosterResult,
       territoryVisitsResult,
+      reportedOutings,
     ] = await Promise.all([
       groupsQuery,
       supabase.from("territories").select("*").eq("active", true).order("number"),
@@ -291,6 +293,7 @@ export async function GET() {
             .select("*, profiles!conductor_id(full_name,username), territory_rounds(territory_id, territories(number))")
             .order("visit_date", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
+      isAdmin || isPlanner ? loadReportedOutings(supabase).catch(() => []) : Promise.resolve([]),
     ]);
 
     const firstError = [
@@ -415,6 +418,8 @@ export async function GET() {
       departurePoints: departurePointsResult.data ?? [],
       weekendRoster: weekendRosterResult.data ?? [],
       territoryVisits: territoryVisitsResult.data ?? [],
+      // When/at which turno each territory was last reported as worked (drives the day-variety rule).
+      territoryLastOutings: Object.fromEntries(lastOccurrences(reportedOutings.map((entry) => ({ territoryId: entry.territoryId, date: entry.date, hora: entry.hora })))),
     });
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Error inesperado.", 401);

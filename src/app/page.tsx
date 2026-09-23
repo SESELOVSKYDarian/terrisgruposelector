@@ -67,7 +67,7 @@ import {
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthority, type PlanningStatus, type SlotStatus } from "@/modules/outings/workflow";
-import { isoWeekdayOf, isWeekendIso, lastOccurrences, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, turnoLabels, turnoOf, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
+import { isoWeekdayOf, isWeekendIso, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, turnoLabels, turnoOf, type Occurrence, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
 import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/outings/place-suggestions";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
@@ -253,6 +253,7 @@ type AppData = {
   departurePoints: DeparturePoint[];
   weekendRoster: WeekendRosterEntry[];
   territoryVisits: TerritoryVisit[];
+  territoryLastOutings: Record<string, Occurrence>;
 };
 type ModalState =
   | { type: "territory"; item?: Territory }
@@ -310,6 +311,7 @@ const emptyData: AppData = {
   departurePoints: [],
   weekendRoster: [],
   territoryVisits: [],
+  territoryLastOutings: {},
 };
 
 const reservationStyles: Record<ReservationStatus, string> = {
@@ -2656,12 +2658,8 @@ function slotPlaceOptions(data: AppData, slot: WeeklyOutingSlot): { options: Pla
   const priority = prioritizeTerritories(
     data.territories.map((territory) => ({ id: territory.id, openSince: openRound.get(territory.id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(territory.id) ?? null, doneInRound: doneInRound.has(territory.id) })),
   );
-  // When/at which turno each territory was last worked: earlier published weeks, outings not cancelled.
-  const history = lastOccurrences(
-    data.weeklyOutings
-      .filter((item) => week && item.starts_on < week.starts_on && (!item.status || item.status === "PUBLISHED"))
-      .flatMap((item) => item.weekly_outing_slots.filter((other) => other.status !== "CANCELADA").flatMap((other) => other.weekly_outing_slot_territories.map((entry) => ({ territoryId: entry.territory_id, date: other.slot_date, hora: other.hora })))),
-  );
+  // Only what a conductor reported as worked counts: planned-but-unreported outings are not history.
+  const history = new Map(Object.entries(data.territoryLastOutings));
   const points: SuggestionPoint[] = data.departurePoints.map((point) => ({
     id: point.id,
     name: point.name,
