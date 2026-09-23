@@ -19,8 +19,7 @@ const userManagementActions = new Set(["createUser", "updateUser", "approveUser"
 
 /** Creating, editing, approving or deleting a user is Coordinador-only (MANAGE_USERS) — this was
  * missing entirely, so any authenticated profile could call these actions directly. */
-async function assertCanManageUsers(profile: { id: string; roles: readonly string[] }) {
-  if (profile.roles.includes("ADMIN")) return; // legacy bridge, kept until every admin has a real Coordinador row
+async function assertCanManageUsers(profile: { id: string }) {
   const context = await getFreshPermissionContext(profile.id);
   if (!context || !hasPermission(context, "MANAGE_USERS")) throw new Error("No tenés permiso para administrar usuarios.");
 }
@@ -971,9 +970,9 @@ export async function POST(request: Request) {
 
     if (action === "deleteUser") {
       const id = String(payload?.id);
-      const { data: user, error: readError } = await supabase.from("profile_roles").select("role").eq("profile_id", id);
+      const { data: responsibilities, error: readError } = await supabase.from("profile_responsibilities").select("responsibility").eq("profile_id", id).eq("responsibility", "COORDINADOR").is("ended_at", null);
       if (readError) return fail(readError.message);
-      if ((user ?? []).some((entry) => entry.role === "ADMIN")) return fail("No se puede eliminar un usuario admin.", 403);
+      if ((responsibilities ?? []).length) return fail("No se puede eliminar un usuario Coordinador.", 403);
       const { error } = await supabase.from("profiles").delete().eq("id", id);
       if (error) return fail(error.message);
       return ok();

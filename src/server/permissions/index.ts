@@ -9,7 +9,6 @@ import {
   type PermissionProfile,
   type ResponsibilityKind,
   isEligibleForResponsibility,
-  mapLegacyRolesToStructuredPermissions,
   structuredPermissionsSchema,
 } from "@/modules/users/permissions";
 
@@ -112,24 +111,13 @@ export async function getFreshPermissionContext(profileId: string): Promise<Fres
   if (error) throw new Error(error.message);
   if (!profileResult.data?.active) return null;
 
+  // legacyRoles is kept only for display (e.g. audit trails, the old "Rol" column) — the Fase-1
+  // backfill and the ongoing "Permisos" screen keep V2 authoritative and complete, so nothing here
+  // reads it for authorization anymore. The legacy role bridge is retired.
   const legacyRoles = (profileResult.data.profile_roles ?? []).map((entry: { role: string }) => entry.role);
-  const fallback = mapLegacyRolesToStructuredPermissions(
-    legacyRoles.filter((role): role is "ADMIN" | "ANCIANO" | "CONDUCTOR" | "PUBLICADOR" =>
-      ["ADMIN", "ANCIANO", "CONDUCTOR", "PUBLICADOR"].includes(role),
-    ),
-  );
-  const appointment = (appointmentResult.data?.appointment ?? fallback.appointment) as AppointmentKind;
-  // ADMIN remains a compatibility bridge until V1 is retired. Merge it with
-  // persisted V2 rows so a legacy-created super-admin cannot lose access
-  // between creating the account and a later backfill/reconciliation run.
-  const capabilities = [...new Set([
-    ...(capabilityResult.data ?? []).map((entry) => entry.capability as CapabilityKind),
-    ...fallback.capabilities,
-  ])];
-  const globalResponsibilities = [...new Set([
-    ...(globalResult.data ?? []).map((entry) => entry.responsibility as GlobalResponsibilityKind),
-    ...fallback.globalResponsibilities,
-  ])];
+  const appointment = (appointmentResult.data?.appointment ?? "PUBLICADOR") as AppointmentKind;
+  const capabilities = (capabilityResult.data ?? []).map((entry) => entry.capability as CapabilityKind);
+  const globalResponsibilities = (globalResult.data ?? []).map((entry) => entry.responsibility as GlobalResponsibilityKind);
   const groupResponsibilities = (groupResult.data ?? []).map((entry) => ({
     groupId: entry.group_id,
     responsibility: entry.responsibility as GroupResponsibilityKind,

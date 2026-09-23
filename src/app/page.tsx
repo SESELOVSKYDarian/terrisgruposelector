@@ -385,10 +385,13 @@ export default function Home() {
     setAuthView(view);
   }
 
-  const isAdmin = Boolean(profile?.roles.includes("ADMIN"));
+  // Legacy-view routing, migrated off profile.roles: V2 (Permisos) is now the only source these
+  // read. Currently identical for every existing account (Fase-1 + the full backfill kept V2 in
+  // sync with the legacy roles), but a profile with no legacy roles at all now routes correctly too.
+  const isAdmin = shellAccess.canManageUsers || shellAccess.canManageSystem || shellAccess.canManageTerritories || shellAccess.canPlanOutings;
   const isPlanner = data.planningAccess.canPlan || data.planningAccess.canPublish;
-  const isAnciano = Boolean(profile?.roles.includes("ANCIANO"));
-  const isConductor = Boolean(profile?.roles.includes("CONDUCTOR"));
+  const isAnciano = shellAccess.canUseReservations;
+  const isConductor = shellAccess.isConductor;
   const openRound = data.rounds.find((round) => round.status === "OPEN");
 
   const loadData = useCallback(async (options?: { throwOnError?: boolean }) => {
