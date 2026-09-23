@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/app/_components/theme-toggle";
 import { miniButtonClass, primarySmallButtonClass } from "@/app/_components/ui-classes";
-import { pushSupported, subscribeThisDevice, thisDeviceId, type SubscribeResult } from "@/components/push/subscribe";
+import { pushSupported, subscribeMessages, subscribeThisDevice, thisDeviceId, type SubscribeResult } from "@/components/push/subscribe";
 import { Card, Empty, Notice, Pill } from "../ui";
 
 type Device = { device_id: string; device_name: string; enabled: boolean; updated_at: string };
@@ -15,14 +15,6 @@ const shortcuts = [
   { keys: "Enter", action: "Abrir el resultado elegido" },
   { keys: "Esc", action: "Cerrar el buscador o un panel" },
 ];
-
-const messages: Record<SubscribeResult, string> = {
-  ok: "Listo: este dispositivo ya recibe avisos.",
-  denied: "El navegador bloqueó los avisos. Podés habilitarlos desde la configuración del sitio.",
-  unconfigured: "Los avisos push todavía no están configurados en este servidor. Tus notificaciones internas siguen funcionando.",
-  unsupported: "Este navegador no admite avisos push. Tus notificaciones internas siguen funcionando.",
-  error: "No se pudo activar ahora. Probá de nuevo más tarde.",
-};
 
 function Notifications() {
   const [permission, setPermission] = useState<string>("desconocido");
@@ -41,7 +33,7 @@ function Notifications() {
           <Pill tone={permission === "granted" ? "emerald" : permission === "denied" ? "rose" : "slate"}>{labels[permission] ?? permission}</Pill>
           <button className={primarySmallButtonClass} disabled={busy || permission === "granted" || permission === "no compatible"} onClick={async () => { setBusy(true); const outcome = await subscribeThisDevice(); setResult(outcome); if (pushSupported()) setPermission(Notification.permission); setBusy(false); }} type="button">Activar avisos</button>
         </div>
-        {result ? <Notice tone={result === "ok" ? "success" : "warning"}>{messages[result]}</Notice> : null}
+        {result ? <Notice tone={result === "ok" ? "success" : "warning"}>{subscribeMessages[result]}</Notice> : null}
       </Card>
     </div>
   );

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createAdminSupabaseClient, getCurrentProfile } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
-import { getPublicVapidKey } from "@/server/push";
+import { getPublicVapidKey, vapidProblem } from "@/server/push";
 
 export const runtime = "nodejs";
 
@@ -21,7 +21,7 @@ export async function GET() {
   if (!profile) return fail("No autenticado.", 401);
   // The person's own devices, for the personal settings screen (never anyone else's).
   const { data } = await createAdminSupabaseClient().from("push_subscriptions").select("device_id, device_name, enabled, updated_at").eq("profile_id", profile.id).order("updated_at", { ascending: false });
-  return ok({ vapidPublicKey: getPublicVapidKey(), devices: data ?? [] });
+  return ok({ vapidPublicKey: getPublicVapidKey(), vapidProblem: vapidProblem(), devices: data ?? [] });
 }
 
 export async function POST(request: Request) {

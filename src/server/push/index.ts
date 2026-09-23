@@ -22,16 +22,43 @@ function decodeBase64url(value: string) {
   return Buffer.from(value, "base64url");
 }
 
+/** Env values often arrive with stray quotes/whitespace or in standard base64: accept those. */
+function cleanKey(value: string | undefined) {
+  const trimmed = value?.trim().replace(/^["']+|["']+$/g, "").trim();
+  return trimmed ? trimmed.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
+}
+
 function vapidConfig() {
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT;
+  const publicKey = cleanKey(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+  const privateKey = cleanKey(process.env.VAPID_PRIVATE_KEY);
+  const subject = process.env.VAPID_SUBJECT?.trim();
   if (!publicKey || !privateKey || !subject) return null;
   return { publicKey, privateKey, subject };
 }
 
+export type VapidProblem = "missing" | "invalid-public" | "invalid-private" | "mismatch";
+
+/** Why push cannot work with the configured keys (null = fine). Never exposes a key value. */
+export function vapidProblem(): VapidProblem | null {
+  const config = vapidConfig();
+  if (!config) return "missing";
+  const publicBytes = decodeBase64url(config.publicKey);
+  if (publicBytes.length !== 65 || publicBytes[0] !== 4) return "invalid-public";
+  const privateBytes = decodeBase64url(config.privateKey);
+  if (privateBytes.length !== 32) return "invalid-private";
+  try {
+    const ecdh = createECDH("prime256v1");
+    ecdh.setPrivateKey(privateBytes);
+    if (!ecdh.getPublicKey().equals(publicBytes)) return "mismatch";
+  } catch {
+    return "invalid-private";
+  }
+  return null;
+}
+
 export function getPublicVapidKey() {
-  return vapidConfig()?.publicKey ?? null;
+  const config = vapidConfig();
+  return config && !vapidProblem() ? config.publicKey : null;
 }
 
 /** Push reuses the inbox mapping so both channels always say the same thing. */
