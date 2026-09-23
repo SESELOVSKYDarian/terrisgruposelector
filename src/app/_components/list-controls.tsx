@@ -129,10 +129,10 @@ export function ListToolbar({
             type="date"
             value={dateTo ?? ""}
           />
-          <button className="rounded-lg border border-border bg-foreground/[0.04] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.08] hover:text-foreground" onClick={() => onQuickRange?.(7)} type="button">
+          <button className="rounded-lg bg-foreground/[0.05] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.09] hover:text-foreground" onClick={() => onQuickRange?.(7)} type="button">
             Ultima semana
           </button>
-          <button className="rounded-lg border border-border bg-foreground/[0.04] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.08] hover:text-foreground" onClick={() => onQuickRange?.(30)} type="button">
+          <button className="rounded-lg bg-foreground/[0.05] px-2.5 py-2 text-xs font-medium text-foreground/80 transition hover:bg-foreground/[0.09] hover:text-foreground" onClick={() => onQuickRange?.(30)} type="button">
             Ultimo mes
           </button>
           {dateFrom || dateTo ? (
@@ -167,7 +167,7 @@ export function PaginationBar({
       <p>Mostrando {start}-{end} de {total}</p>
       <div className="flex items-center gap-1">
         <button
-          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-foreground/80 transition hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
+          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg bg-foreground/[0.05] text-foreground/80 transition hover:bg-foreground/[0.09] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
           type="button"
@@ -176,7 +176,7 @@ export function PaginationBar({
         </button>
         <span className="px-2 text-xs">Pagina {page} de {totalPages}</span>
         <button
-          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-foreground/80 transition hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
+          className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg bg-foreground/[0.05] text-foreground/80 transition hover:bg-foreground/[0.09] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30")}
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
           type="button"

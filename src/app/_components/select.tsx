@@ -64,9 +64,9 @@ export function Select({
         <ChevronDown aria-hidden="true" className={cn("shrink-0 text-muted transition-transform", open && "rotate-180")} size={14} />
       </button>
       {open ? (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface-strong shadow-2xl">
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[180px] overflow-hidden rounded-lg bg-surface-strong shadow-2xl">
           {showSearch ? (
-            <div className="relative border-b border-border p-1.5">
+            <div className="relative border-b border-border/60 p-1.5">
               <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={13} />
               <input
                 autoFocus
