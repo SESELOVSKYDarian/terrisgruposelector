@@ -4,6 +4,8 @@ export type TemplateSlot = {
   hora: string;
   lugar: string | null;
   default_conductor_id: string | null;
+  /** Designated group instead of a fixed conductor (never both). */
+  default_group_id?: string | null;
   active: boolean;
   sort_order: number;
 };
@@ -14,6 +16,7 @@ export type MaterializedSlot = {
   hora: string;
   lugar: string | null;
   conductor_id: string | null;
+  group_id: string | null;
   sort_order: number;
 };
 
@@ -58,6 +61,7 @@ export function planMaterialization(startsOn: string, template: TemplateSlot[], 
         hora: formatTemplateHora(slot.hora),
         lugar: slot.lugar,
         conductor_id: slot.default_conductor_id,
+        group_id: slot.default_group_id ?? null,
         sort_order: order,
       };
     });

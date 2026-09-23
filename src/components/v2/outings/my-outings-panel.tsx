@@ -16,7 +16,7 @@ import { useModuleApi } from "../use-module-api";
 type Territory = { territory_id: string; number: string | number; name: string | null; labels: string[]; prior_done: string[]; do_not_visit?: string[] };
 type Entry = Territory & { done_labels: string[]; planned: boolean; round_closed?: boolean };
 type Report = { id: string; notes: string | null; submitted_by_name: string | null; on_behalf: boolean; entries: (Entry & { pending_labels: string[] })[] };
-type Slot = { id: string; slot_date: string; hora: string | null; lugar: string | null; status: string; conductor_name: string | null; mine: boolean; overdue: boolean; is_zoom: boolean; phone: PhoneBlock | null; territories: Territory[]; report: Report | null };
+type Slot = { id: string; slot_date: string; hora: string | null; lugar: string | null; status: string; conductor_name: string | null; group_name?: string | null; mine: boolean; overdue: boolean; is_zoom: boolean; phone: PhoneBlock | null; territories: Territory[]; report: Report | null };
 type State = { me: string; canReportForOthers: boolean; slots: Slot[]; territories: { id: string; number: string | number; name: string | null }[] };
 
 const dayNames = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
@@ -131,6 +131,7 @@ function SlotCard({ slot, state, run, busy }: { slot: Slot; state: State; run: (
           <p className="text-sm font-semibold text-foreground">{dayLabel(slot.slot_date)} · {slot.hora || "Sin hora"}</p>
           <p className="text-sm text-muted">{slot.lugar || "Sin lugar"}</p>
           {!slot.mine && slot.conductor_name ? <p className="text-xs text-muted">Conductor: {slot.conductor_name}</p> : null}
+          {!slot.conductor_name && slot.group_name ? <p className="text-xs text-muted">Salida por grupo: {slot.group_name}</p> : null}
         </div>
         <div className="flex items-center gap-2">
           {slot.is_zoom ? <Pill tone="sky">Zoom</Pill> : null}

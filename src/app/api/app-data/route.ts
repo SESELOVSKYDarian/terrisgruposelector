@@ -278,7 +278,7 @@ export async function GET() {
       isPlanner
         ? supabase
             .from("weekly_outings")
-            .select("*, weekly_outing_slots(*, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(*, territories(number), territory_rounds(pending_block_labels,conductor_id)))")
+            .select("*, weekly_outing_slots(*, groups(name), profiles!conductor_id(full_name,username), weekly_outing_slot_territories(*, territories(number), territory_rounds(pending_block_labels,conductor_id)))")
             .order("starts_on", { ascending: false })
         : Promise.resolve({ data: [], error: null }),
       isAdmin || isPlanner
@@ -322,7 +322,7 @@ export async function GET() {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const { data: published, error: publishedError } = await supabase
         .from("weekly_outings")
-        .select("id, starts_on, status, weekly_outing_slots(id, weekly_outing_id, slot_date, sort_order, hora, lugar, conductor_id, highlighted, note, status, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(id, slot_id, territory_id, sort_order, display_override, territories(number), territory_rounds(pending_block_labels)))")
+        .select("id, starts_on, status, weekly_outing_slots(id, weekly_outing_id, slot_date, sort_order, hora, lugar, conductor_id, group_id, highlighted, note, status, groups(name), profiles!conductor_id(full_name,username), weekly_outing_slot_territories(id, slot_id, territory_id, sort_order, display_override, territories(number), territory_rounds(pending_block_labels)))")
         .eq("status", "PUBLISHED")
         .gte("starts_on", cutoff)
         .order("starts_on", { ascending: true });
@@ -859,27 +859,6 @@ export async function POST(request: Request) {
         );
         if (insertError) return fail(insertError.message);
       }
-      return ok();
-    }
-
-    if (action === "upsertWeekendRoster") {
-      const serviceDate = String(payload?.service_date ?? "");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return fail("Fecha invalida.", 422);
-      const day = new Date(`${serviceDate}T00:00:00Z`).getUTCDay();
-      if (day !== 6 && day !== 0) return fail("La fecha debe ser sabado o domingo.", 422);
-
-      const conductorId = payload?.conductor_id ? String(payload.conductor_id) : null;
-      if (!conductorId) {
-        const { error } = await supabase.from("weekend_roster").delete().eq("service_date", serviceDate);
-        if (error) return fail(error.message);
-        return ok();
-      }
-
-      const { error } = await supabase.from("weekend_roster").upsert(
-        { service_date: serviceDate, conductor_id: conductorId, updated_at: new Date().toISOString() },
-        { onConflict: "service_date" },
-      );
-      if (error) return fail(error.message);
       return ok();
     }
 

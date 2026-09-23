@@ -6,32 +6,32 @@ import { Select } from "@/app/_components/select";
 import { miniButtonClass, primarySmallButtonClass } from "@/app/_components/ui-classes";
 import { isoWeekdayNames } from "@/modules/outings/recurring";
 import { cn } from "@/lib/utils";
+import { AssigneePicker } from "./assignee-picker";
 import { Card, Empty, Notice, fieldClass } from "../ui";
 import { useModuleApi } from "../use-module-api";
 
-type TemplateRow = { id: string; isodow: number; hora: string; lugar: string | null; default_conductor_id: string | null; conductor_name: string | null; active: boolean };
-type State = { slots: TemplateRow[]; conductors: { id: string; full_name: string }[] };
+type TemplateRow = { id: string; isodow: number; hora: string; lugar: string | null; default_conductor_id: string | null; default_group_id?: string | null; conductor_name: string | null; group_name?: string | null; active: boolean };
+type State = { slots: TemplateRow[]; conductors: { id: string; full_name: string }[]; groups: { id: string; name: string }[] };
 export type PlanningWeek = { id: string; starts_on: string; status?: string };
 
 const displayOrder = [1, 2, 3, 4, 5, 6, 7];
 
-function TemplateRowEditor({ row, conductors, run }: { row: TemplateRow; conductors: State["conductors"]; run: (action: string, payload?: Record<string, unknown>) => Promise<boolean> }) {
+function TemplateRowEditor({ row, conductors, groups, run }: { row: TemplateRow; conductors: State["conductors"]; groups: State["groups"]; run: (action: string, payload?: Record<string, unknown>) => Promise<boolean> }) {
   const [hora, setHora] = useState(row.hora);
   const [lugar, setLugar] = useState(row.lugar ?? "");
-  const starred = Boolean(row.default_conductor_id);
+  const starred = Boolean(row.default_conductor_id || row.default_group_id);
   return (
     <div className={cn("flex flex-wrap items-center gap-2 rounded-xl bg-foreground/[0.03] px-3 py-2", !row.active && "opacity-50")}>
       <input aria-label="Hora" className={cn(fieldClass, "w-[92px]")} onBlur={() => hora && hora !== row.hora && void run("update", { id: row.id, hora })} onChange={(event) => setHora(event.target.value)} type="time" value={hora} />
-      <div className="w-52">
-        <Select
-          onChange={(value) => void run("update", { id: row.id, default_conductor_id: value || null })}
-          options={[{ value: "", label: "Sin conductor fijo" }, ...conductors.map((conductor) => ({ value: conductor.id, label: conductor.full_name }))]}
-          placeholder="Conductor"
-          size="compact"
-          value={row.default_conductor_id ?? ""}
+      <div className="w-56">
+        <AssigneePicker
+          conductors={conductors}
+          groups={groups}
+          onChange={(next) => void run("update", { id: row.id, default_conductor_id: next.conductorId || null, default_group_id: next.groupId || null })}
+          value={{ conductorId: row.default_conductor_id ?? "", groupId: row.default_group_id ?? "" }}
         />
       </div>
-      <span className={cn("inline-flex items-center gap-1 text-xs", starred ? "text-amber-300" : "text-muted")} title="Conductor semanal predeterminado">
+      <span className={cn("inline-flex items-center gap-1 text-xs", starred ? "text-amber-300" : "text-muted")} title="Conductor o grupo semanal predeterminado">
         <Star fill={starred ? "currentColor" : "none"} size={14} aria-hidden="true" />
         {starred ? "Predeterminado" : "Sin estrella"}
       </span>
@@ -63,7 +63,7 @@ export function RecurringConductorsPanel({ weeks }: { weeks: PlanningWeek[] }) {
   return (
     <div className="space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <Card title="Calendario semanal fijo" description="La estrella es el conductor semanal predeterminado: se conserva semana a semana hasta que lo cambies. Ajustar una semana puntual no modifica esta plantilla.">
+      <Card title="Calendario semanal fijo" description="La estrella es el conductor (o el grupo designado) semanal predeterminado: se conserva semana a semana hasta que lo cambies. Ajustar una semana puntual no modifica esta plantilla.">
         <div className="space-y-4">
           {displayOrder.map((isodow) => {
             const rows = data.slots.filter((slot) => slot.isodow === isodow);
@@ -75,7 +75,7 @@ export function RecurringConductorsPanel({ weeks }: { weeks: PlanningWeek[] }) {
                     <Plus size={14} aria-hidden="true" />Agregar horario
                   </button>
                 </div>
-                {rows.length ? rows.map((row) => <TemplateRowEditor conductors={data.conductors} key={`${row.id}:${row.hora}:${row.lugar}`} row={row} run={run} />) : <p className="px-1 text-xs text-muted">Sin salida.</p>}
+                {rows.length ? rows.map((row) => <TemplateRowEditor conductors={data.conductors} groups={data.groups ?? []} key={`${row.id}:${row.hora}:${row.lugar}`} row={row} run={run} />) : <p className="px-1 text-xs text-muted">Sin salida.</p>}
               </div>
             );
           })}

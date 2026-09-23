@@ -10,12 +10,13 @@ export const runtime = "nodejs";
 
 const hora = z.string().refine(isValidHora, "Hora inválida (HH:MM).");
 const conductorId = z.string().uuid().nullable().optional();
+const groupId = z.string().uuid().nullable().optional();
 
 const mutation = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create"), payload: z.object({ isodow: z.number().int().min(1).max(7), hora, lugar: z.string().trim().max(180).nullable().optional(), default_conductor_id: conductorId }) }),
+  z.object({ action: z.literal("create"), payload: z.object({ isodow: z.number().int().min(1).max(7), hora, lugar: z.string().trim().max(180).nullable().optional(), default_conductor_id: conductorId, default_group_id: groupId }) }),
   z.object({
     action: z.literal("update"),
-    payload: z.object({ id: z.string().uuid(), isodow: z.number().int().min(1).max(7).optional(), hora: hora.optional(), lugar: z.string().trim().max(180).nullable().optional(), default_conductor_id: conductorId, active: z.boolean().optional() }),
+    payload: z.object({ id: z.string().uuid(), isodow: z.number().int().min(1).max(7).optional(), hora: hora.optional(), lugar: z.string().trim().max(180).nullable().optional(), default_conductor_id: conductorId, default_group_id: groupId, active: z.boolean().optional() }),
   }),
   z.object({ action: z.literal("delete"), payload: z.object({ id: z.string().uuid() }) }),
   z.object({ action: z.literal("applyToWeek"), payload: z.object({ weekly_outing_id: z.string().uuid() }) }),
@@ -32,9 +33,15 @@ export async function GET() {
   return handle(async () => {
     await requirePlanner();
     const supabase = createAdminSupabaseClient();
-    const [slots, conductors] = await Promise.all([loadTemplate(supabase), listConductors(supabase)]);
+    const [slots, conductors, groupsResult] = await Promise.all([loadTemplate(supabase), listConductors(supabase), supabase.from("groups").select("id, name").order("name")]);
     const names = new Map(conductors.map((conductor) => [conductor.id, conductor.full_name]));
-    return { slots: slots.map((slot) => ({ ...slot, conductor_name: slot.default_conductor_id ? names.get(slot.default_conductor_id) ?? null : null })), conductors };
+    const groups = groupsResult.data ?? [];
+    const groupNames = new Map(groups.map((group) => [group.id as string, group.name as string]));
+    return {
+      slots: slots.map((slot) => ({ ...slot, default_group_id: slot.default_group_id ?? null, conductor_name: slot.default_conductor_id ? names.get(slot.default_conductor_id) ?? null : null, group_name: slot.default_group_id ? groupNames.get(slot.default_group_id) ?? null : null })),
+      conductors,
+      groups,
+    };
   });
 }
 
@@ -67,10 +74,16 @@ export async function POST(request: Request) {
       throw new ApiError("El conductor predeterminado debe tener la característica Conductor.", 422);
     }
 
+    if (payload.default_group_id) {
+      const { data: group } = await supabase.from("groups").select("id").eq("id", payload.default_group_id).maybeSingle();
+      if (!group) throw new ApiError("El grupo no existe.", 422);
+    }
+    if (payload.default_group_id && payload.default_conductor_id) throw new ApiError("Elegí un conductor o un grupo, no ambos.", 422);
+
     if (action === "create") {
       const { data, error } = await supabase
         .from("recurring_outing_slots")
-        .insert({ isodow: payload.isodow, hora: payload.hora, lugar: payload.lugar || null, default_conductor_id: payload.default_conductor_id ?? null, created_by: profile.id })
+        .insert({ isodow: payload.isodow, hora: payload.hora, lugar: payload.lugar || null, default_conductor_id: payload.default_conductor_id ?? null, ...(payload.default_group_id ? { default_group_id: payload.default_group_id } : {}), created_by: profile.id })
         .select("id")
         .single();
       if (error || !data) throw new Error(error?.message ?? "No se pudo crear la fila.");
@@ -85,7 +98,11 @@ export async function POST(request: Request) {
     if (patch.isodow !== undefined) update.isodow = patch.isodow;
     if (patch.hora !== undefined) update.hora = patch.hora;
     if (patch.lugar !== undefined) update.lugar = patch.lugar || null;
+    // A row has a conductor or a group, never both: choosing one clears the other.
     if (patch.default_conductor_id !== undefined) update.default_conductor_id = patch.default_conductor_id;
+    if (patch.default_group_id !== undefined) update.default_group_id = patch.default_group_id;
+    if (patch.default_group_id) update.default_conductor_id = null;
+    if (patch.default_conductor_id) update.default_group_id = null;
     if (patch.active !== undefined) update.active = patch.active;
     const { error } = await supabase.from("recurring_outing_slots").update(update).eq("id", id);
     if (error) throw new Error(error.message);

@@ -4,9 +4,14 @@ import { formatTemplateHora, planMaterialization, type TemplateSlot } from "@/mo
 import type { AdminSupabase } from "./planning";
 
 export async function loadTemplate(supabase: AdminSupabase): Promise<TemplateSlot[]> {
-  const { data, error } = await supabase.from("recurring_outing_slots").select("id,isodow,hora,lugar,default_conductor_id,active,sort_order").order("isodow").order("hora");
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => ({ ...row, hora: formatTemplateHora(row.hora as string) })) as TemplateSlot[];
+  const columns = "id,isodow,hora,lugar,default_conductor_id,default_group_id,active,sort_order";
+  let result = await supabase.from("recurring_outing_slots").select(columns).order("isodow").order("hora");
+  // Before the Fase 24 migration there is no group column: keep the template working without it.
+  if (result.error && result.error.message.includes("default_group_id")) {
+    result = await supabase.from("recurring_outing_slots").select(columns.replace("default_group_id,", "")).order("isodow").order("hora") as unknown as typeof result;
+  }
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []).map((row) => ({ ...row, hora: formatTemplateHora(row.hora as string) })) as TemplateSlot[];
 }
 
 /**

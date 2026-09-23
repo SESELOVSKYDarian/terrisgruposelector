@@ -21,6 +21,13 @@ type VisitRow = { id: string; territory_round_id: string; visit_date: string; cr
 
 const isPlanner = (authority: PlanningAuthority) => authority.canPlan || authority.canPublish;
 
+/** Groups where the person is superintendente/auxiliar (V2), i.e. who answers for an outing designated to that group. */
+async function responsibleGroupIds(supabase: AdminSupabase, profileId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.from("group_responsibility_assignments").select("group_id").eq("profile_id", profileId).is("ended_at", null);
+  if (error) throw new Error(error.message);
+  return new Set((data ?? []).map((row) => row.group_id as string));
+}
+
 /** Labels and "done so far" for the territory's currently open round (the state a new report starts from). */
 export async function territoryFormState(supabase: AdminSupabase, territoryId: string) {
   const labels = await territoryLabels(supabase, territoryId);
@@ -60,6 +67,14 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
   if (mine.error) throw new Error(mine.error.message);
   let slots = ((mine.data ?? []) as unknown as SlotRecord[]).filter(isPublished);
 
+  // Outings designated to a group (no conductor named yet) reach the group's responsibles.
+  const myGroupIds = await responsibleGroupIds(supabase, profile.id);
+  if (myGroupIds.size) {
+    const designated = await supabase.from("weekly_outing_slots").select(SLOT_SELECT).in("group_id", [...myGroupIds]).is("conductor_id", null).gte("slot_date", from).lte("slot_date", to).order("slot_date").order("sort_order");
+    if (designated.error) throw new Error(designated.error.message);
+    slots = [...slots, ...((designated.data ?? []) as unknown as SlotRecord[]).filter(isPublished)];
+  }
+
   let othersPendingIds: string[] = [];
   if (isPlanner(authority)) {
     const others = await supabase.from("weekly_outing_slots").select(SLOT_SELECT).neq("conductor_id", profile.id).not("conductor_id", "is", null).eq("status", "PROGRAMADA").gte("slot_date", addDaysIso(today, -14)).lte("slot_date", today).order("slot_date");
@@ -67,6 +82,14 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
     const extra = ((others.data ?? []) as unknown as SlotRecord[]).filter(isPublished);
     othersPendingIds = extra.map((slot) => slot.id);
     slots = [...slots, ...extra];
+    // Group-designated outings nobody has reported yet also wait for a planner to load them.
+    const groupPending = await supabase.from("weekly_outing_slots").select(SLOT_SELECT).is("conductor_id", null).not("group_id", "is", null).eq("status", "PROGRAMADA").gte("slot_date", addDaysIso(today, -14)).lte("slot_date", today).order("slot_date");
+    if (groupPending.error) throw new Error(groupPending.error.message);
+    for (const slot of ((groupPending.data ?? []) as unknown as SlotRecord[]).filter(isPublished)) {
+      if (slots.some((existing) => existing.id === slot.id)) continue;
+      othersPendingIds.push(slot.id);
+      slots.push(slot);
+    }
   }
   if (!slots.length) return { me: profile.id, canReportForOthers: isPlanner(authority), slots: [] as unknown[], territories: await allTerritories(supabase) };
 
@@ -109,6 +132,9 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
 
   const profileIds = [...new Set([...slots.map((slot) => slot.conductor_id), ...(reports ?? []).map((report) => report.submitted_by as string | null)].filter((id): id is string => Boolean(id)))];
   const { data: people } = profileIds.length ? await supabase.from("profiles").select("id, full_name").in("id", profileIds) : { data: [] };
+  const groupIdsInSlots = [...new Set(slots.map((slot) => slot.group_id).filter((id): id is string => Boolean(id)))];
+  const { data: groupRows } = groupIdsInSlots.length ? await supabase.from("groups").select("id, name").in("id", groupIdsInSlots) : { data: [] };
+  const groupNameOf = (id: string | null) => (groupRows ?? []).find((group) => group.id === id)?.name as string | undefined ?? null;
   const nameOf = (id: string | null) => formatConductorName((people ?? []).find((person) => person.id === id)?.full_name) || null;
 
   const territoryMeta = new Map<string, { number: string | number; name: string | null }>();
@@ -162,7 +188,8 @@ export async function loadMyOutings(supabase: AdminSupabase, profile: SessionPro
       phone: phoneBlocks.get(slot.id) ?? null,
       conductor_id: slot.conductor_id,
       conductor_name: nameOf(slot.conductor_id),
-      mine: slot.conductor_id === profile.id,
+      group_name: groupNameOf(slot.group_id),
+      mine: slot.conductor_id === profile.id || (!slot.conductor_id && Boolean(slot.group_id) && myGroupIds.has(slot.group_id as string)),
       report_deadline: deadline?.toISOString() ?? null,
       overdue: !report && (slot.status ?? "PROGRAMADA") === "PROGRAMADA" && (deadline ? deadline.getTime() < now.getTime() : slot.slot_date < today),
       territories,
@@ -184,7 +211,7 @@ async function allTerritories(supabase: AdminSupabase) {
 /** Creates or edits the outing report and rebuilds every affected round (S-13 rules). */
 export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
   const { supabase, profile, authority } = ctx;
-  const { data: slot, error: slotError } = await supabase.from("weekly_outing_slots").select("id, weekly_outing_id, slot_date, conductor_id, status, is_zoom, weekly_outing_slot_territories(territory_id)").eq("id", input.slot_id).maybeSingle();
+  const { data: slot, error: slotError } = await supabase.from("weekly_outing_slots").select("id, weekly_outing_id, slot_date, conductor_id, group_id, status, is_zoom, weekly_outing_slot_territories(territory_id)").eq("id", input.slot_id).maybeSingle();
   if (slotError) throw new Error(slotError.message);
   if (!slot) throw new ApiError("Salida no encontrada.", 404);
   const week = await loadWeek(supabase, slot.weekly_outing_id as string);
@@ -192,8 +219,11 @@ export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
   if (slot.status === "CANCELADA") throw new ApiError("La salida fue cancelada.", 409);
   // S-13 is house-to-house only: a Zoom outing reports call results instead of blocks.
   if (slot.is_zoom) throw new ApiError("Las salidas por Zoom se informan con los resultados telefónicos.", 409);
-  if (!slot.conductor_id) throw new ApiError("La salida no tiene conductor asignado.", 422);
-  const onBehalf = slot.conductor_id !== profile.id;
+  if (!slot.conductor_id && !slot.group_id) throw new ApiError("La salida no tiene conductor ni grupo asignado.", 422);
+  // A group-designated outing has no conductor: its group's responsibles report it, and the visit is booked under them.
+  const groupResponsible = !slot.conductor_id && Boolean(slot.group_id) && (await responsibleGroupIds(supabase, profile.id)).has(slot.group_id as string);
+  const responsibleId = (slot.conductor_id as string | null) ?? profile.id;
+  const onBehalf = slot.conductor_id ? slot.conductor_id !== profile.id : !groupResponsible;
   if (onBehalf && !isPlanner(authority)) forbid("Solo el conductor de la salida puede cargar su informe.");
 
   const entries = input.entries;
@@ -219,7 +249,7 @@ export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
     const { error } = await supabase.from("outing_reports").update({ notes: input.notes || null, updated_by: profile.id, updated_at: now }).eq("id", reportId);
     if (error) throw new Error(error.message);
   } else {
-    const { data, error } = await supabase.from("outing_reports").insert({ slot_id: slot.id, conductor_id: slot.conductor_id, submitted_by: profile.id, updated_by: profile.id, notes: input.notes || null }).select("id").single();
+    const { data, error } = await supabase.from("outing_reports").insert({ slot_id: slot.id, conductor_id: responsibleId, submitted_by: profile.id, updated_by: profile.id, notes: input.notes || null }).select("id").single();
     if (error || !data) throw new Error(error?.message ?? "No se pudo guardar el informe.");
     reportId = data.id as string;
   }
@@ -243,8 +273,8 @@ export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
       touchedRounds.add(existing.territory_round_id);
       continue;
     }
-    const roundId = await openOrCreateRound(supabase, entry.territory_id, slot.conductor_id as string, slot.slot_date as string);
-    const { error } = await supabase.from("territory_visits").insert({ territory_round_id: roundId, conductor_id: slot.conductor_id, visit_date: slot.slot_date, done_labels: entry.done_labels, pending_labels: [], outing_report_id: reportId, slot_id: slot.id, submitted_by: profile.id, updated_by: profile.id, planned: planned.has(entry.territory_id) });
+    const roundId = await openOrCreateRound(supabase, entry.territory_id, responsibleId, slot.slot_date as string);
+    const { error } = await supabase.from("territory_visits").insert({ territory_round_id: roundId, conductor_id: responsibleId, visit_date: slot.slot_date, done_labels: entry.done_labels, pending_labels: [], outing_report_id: reportId, slot_id: slot.id, submitted_by: profile.id, updated_by: profile.id, planned: planned.has(entry.territory_id) });
     if (error) throw new Error(error.message);
     touchedRounds.add(roundId);
   }
@@ -262,10 +292,10 @@ export async function submitReport(ctx: ReportCtx, input: SubmitReportInput) {
   if (slot.status === "PROGRAMADA") {
     await supabase.from("weekly_outing_slots").update({ status: "REALIZADA", updated_at: now }).eq("id", slot.id);
   }
-  await writeAudit(supabase, { actorId: profile.id, action: created ? "OUTING_REPORT_SUBMITTED" : "OUTING_REPORT_UPDATED", entityType: "outing_report", entityId: reportId, metadata: { slot_id: slot.id, slot_date: slot.slot_date, on_behalf: onBehalf, conductor_id: slot.conductor_id }, before: created ? null : { territory_ids: before }, after: { territories: entries } });
+  await writeAudit(supabase, { actorId: profile.id, action: created ? "OUTING_REPORT_SUBMITTED" : "OUTING_REPORT_UPDATED", entityType: "outing_report", entityId: reportId, metadata: { slot_id: slot.id, slot_date: slot.slot_date, on_behalf: onBehalf, conductor_id: responsibleId, group_id: slot.group_id ?? null }, before: created ? null : { territory_ids: before }, after: { territories: entries } });
 
   if (created) {
-    const { data: conductor } = await supabase.from("profiles").select("full_name").eq("id", slot.conductor_id).maybeSingle();
+    const { data: conductor } = await supabase.from("profiles").select("full_name").eq("id", responsibleId).maybeSingle();
     const title = `${formatConductorName(conductor?.full_name as string | undefined)} informó la salida del ${formatDateEs(slot.slot_date as string)}${onBehalf ? ` (cargado por ${formatConductorName(profile.full_name)})` : ""}.`;
     for (const recipientId of await resolvePlannerIds(supabase)) {
       if (recipientId === profile.id) continue;

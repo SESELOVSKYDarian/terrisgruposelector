@@ -70,6 +70,7 @@ import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthorit
 import { isoWeekdayOf, isWeekendIso, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, turnoLabels, turnoOf, type Occurrence, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
 import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/outings/place-suggestions";
 import { formatSlotTerritories } from "@/modules/outings/territory-text";
+import { AssigneePicker } from "@/components/v2/outings/assignee-picker";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
@@ -204,6 +205,8 @@ type WeeklyOutingSlot = {
   note: string | null;
   status?: SlotStatus;
   group_id?: string | null;
+  group_response_id?: string | null;
+  groups?: { name: string } | null;
   is_zoom?: boolean;
   time_parse_status?: "PARSED" | "EMPTY" | "UNPARSEABLE" | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
@@ -230,7 +233,8 @@ type DeparturePoint = {
 type WeekendRosterEntry = {
   id: string;
   service_date: string;
-  conductor_id: string;
+  conductor_id: string | null;
+  group_id?: string | null;
   profiles?: Pick<Profile, "full_name" | "username"> | null;
 };
 type AppData = {
@@ -2467,6 +2471,7 @@ function PublishedPlanningView({ data }: { data: AppData }) {
                         </div>
                         {slot.lugar ? <p className="mt-1.5 flex items-center gap-2 text-sm text-slate-300"><MapPin className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.lugar}</p> : null}
                         {slot.profiles?.full_name ? <p className="mt-1 flex items-center gap-2 text-sm text-slate-300"><User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.profiles.full_name}</p> : null}
+                        {!slot.profiles?.full_name && slot.groups?.name ? <p className="mt-1 flex items-center gap-2 text-sm text-slate-300"><Users className="shrink-0 text-slate-500" size={13} aria-hidden="true" />Grupo {slot.groups.name}</p> : null}
                         {territoriesText ? (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200">Territorios {territoriesText}</span>
@@ -2486,14 +2491,73 @@ function PublishedPlanningView({ data }: { data: AppData }) {
   );
 }
 
-function nextAvailableWeekendDate(existingDates: Set<string>) {
+type WeekendRow = { saturday: string; sat?: WeekendRosterEntry; sun?: WeekendRosterEntry };
+
+function buildWeekendRows(roster: WeekendRosterEntry[], extraSaturdays: string[]): WeekendRow[] {
+  const rows = new Map<string, WeekendRow>();
+  const rowFor = (saturday: string) => {
+    const existing = rows.get(saturday);
+    if (existing) return existing;
+    const created: WeekendRow = { saturday };
+    rows.set(saturday, created);
+    return created;
+  };
+  for (const entry of roster) {
+    const isSaturday = new Date(`${entry.service_date}T00:00:00Z`).getUTCDay() === 6;
+    const row = rowFor(isSaturday ? entry.service_date : addDays(entry.service_date, -1));
+    if (isSaturday) row.sat = entry;
+    else row.sun = entry;
+  }
+  for (const saturday of extraSaturdays) rowFor(saturday);
+  return [...rows.values()].sort((a, b) => a.saturday.localeCompare(b.saturday));
+}
+
+/** The Saturday of the weekend a date belongs to (Sunday -> the day before; a weekday -> the coming Saturday). */
+function toSaturday(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 6 ? date : day === 0 ? addDays(date, -1) : addDays(date, 6 - day);
+}
+
+function nextFreeSaturday(taken: Set<string>) {
   const today = new Date();
   const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const diffToSaturday = (6 - cursor.getUTCDay() + 7) % 7;
-  cursor.setUTCDate(cursor.getUTCDate() + diffToSaturday);
+  cursor.setUTCDate(cursor.getUTCDate() + ((6 - cursor.getUTCDay() + 7) % 7));
   let candidate = cursor.toISOString().slice(0, 10);
-  while (existingDates.has(candidate)) candidate = addDays(candidate, 1);
+  while (taken.has(candidate)) candidate = addDays(candidate, 7);
   return candidate;
+}
+
+function RosterDay({
+  date,
+  label,
+  tone,
+  entry,
+  conductors,
+  groups,
+  mutate,
+}: {
+  date: string;
+  label: string;
+  tone: "sky" | "amber";
+  entry?: WeekendRosterEntry;
+  conductors: Profile[];
+  groups: Group[];
+  mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
+}) {
+  return (
+    <div className="rounded-xl bg-black/15 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className={cn("inline-flex rounded-lg border px-2 py-0.5 text-[11px] font-semibold uppercase", tone === "sky" ? "border-sky-400/25 bg-sky-500/10 text-sky-200" : "border-amber-400/25 bg-amber-500/10 text-amber-200")}>{label}</span>
+        <span className="text-sm font-medium text-white">{displayDateEs(date)}</span>
+      </div>
+      <AssigneePicker
+        conductors={conductors}
+        groups={groups}
+        onChange={(next) => void mutate("upsertWeekendRoster", { service_date: date, conductor_id: next.conductorId || null, group_id: next.groupId || null })}
+        value={{ conductorId: entry?.conductor_id ?? "", groupId: entry?.group_id ?? "" }}
+      />
+    </div>
+  );
 }
 
 function WeekendRosterPanel({
@@ -2504,79 +2568,71 @@ function WeekendRosterPanel({
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
 }) {
   const conductors = data.profiles.filter((item) => hasCapability(item, "CONDUCTOR"));
-  const sortedRoster = [...data.weekendRoster].sort((a, b) => a.service_date.localeCompare(b.service_date));
-  const conductorOptions = [{ value: "", label: "Sin asignar" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))];
+  const [extraSaturdays, setExtraSaturdays] = useState<string[]>([]);
+  const rows = useMemo(() => buildWeekendRows(data.weekendRoster, extraSaturdays), [data.weekendRoster, extraSaturdays]);
+  const nameOf = (entry?: WeekendRosterEntry) => (entry ? entry.profiles?.full_name ?? data.groups.find((group) => group.id === entry.group_id)?.name ?? "" : "");
   const controls = useListControls({
-    items: sortedRoster,
-    searchText: (entry) => entry.profiles?.full_name ?? "",
-    dateValue: (entry) => entry.service_date,
+    items: rows,
+    searchText: (row) => `${nameOf(row.sat)} ${nameOf(row.sun)}`,
+    dateValue: (row) => row.saturday,
   });
 
   const [adding, setAdding] = useState(false);
   const [newDate, setNewDate] = useState("");
-  const [newConductorId, setNewConductorId] = useState("");
 
   function startAdding() {
-    const existing = new Set(data.weekendRoster.map((entry) => entry.service_date));
-    setNewDate(nextAvailableWeekendDate(existing));
-    setNewConductorId("");
+    setNewDate(nextFreeSaturday(new Set(rows.map((row) => row.saturday))));
     setAdding(true);
   }
 
-  async function confirmAdd() {
-    if (!newDate || !newConductorId) return;
-    const result = await mutate("upsertWeekendRoster", { service_date: newDate, conductor_id: newConductorId });
-    if (result) setAdding(false);
+  function confirmAdd() {
+    if (!newDate) return;
+    const saturday = toSaturday(newDate);
+    setExtraSaturdays((current) => (current.includes(saturday) ? current : [...current, saturday]));
+    setAdding(false);
+  }
+
+  async function clearWeekend(row: WeekendRow) {
+    for (const entry of [row.sat, row.sun]) {
+      if (entry) await mutate("upsertWeekendRoster", { service_date: entry.service_date, conductor_id: null, group_id: null });
+    }
+    setExtraSaturdays((current) => current.filter((saturday) => saturday !== row.saturday));
   }
 
   return (
     <Panel
       title="Conductores de fin de semana"
-      description="Vos armas la lista: agrega cada sabado o domingo con su conductor. Se sugiere solo en las filas de Salidas semanales de ese dia."
-      action={<AddButton onClick={startAdding}>Fecha</AddButton>}
+      description="Cada fin de semana tiene su sabado y su domingo: a cada dia le asignas un conductor o un grupo. Se sugiere en las filas de Salidas semanales de ese dia."
+      action={<AddButton onClick={startAdding}>Fin de semana</AddButton>}
     >
-      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar conductor..." query={controls.query} showDateFilter dateFrom={controls.dateFrom} dateTo={controls.dateTo} onDateFromChange={controls.setDateFrom} onDateToChange={controls.setDateTo} onQuickRange={controls.setQuickRange} />
+      <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar conductor o grupo..." query={controls.query} showDateFilter dateFrom={controls.dateFrom} dateTo={controls.dateTo} onDateFromChange={controls.setDateFrom} onDateToChange={controls.setDateTo} onQuickRange={controls.setQuickRange} />
       <div className="space-y-2">
         {adding ? (
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-3.5 py-3">
-            <input
-              className="min-h-9 rounded-lg bg-black/20 px-2.5 py-1.5 text-sm text-white outline-none"
-              onChange={(event) => setNewDate(event.target.value)}
-              type="date"
-              value={newDate}
-            />
-            <div className="w-44">
-              <Select onChange={setNewConductorId} options={conductors.map((item) => ({ value: item.id, label: item.full_name }))} placeholder="Elegir conductor" size="compact" value={newConductorId} />
-            </div>
+            <input className="min-h-9 rounded-lg bg-black/20 px-2.5 py-1.5 text-sm text-white outline-none" onChange={(event) => setNewDate(event.target.value)} type="date" value={newDate} />
+            <span className="text-xs text-slate-400">Se agrega el sabado y el domingo de esa semana.</span>
             <button className={miniButtonClass} onClick={() => setAdding(false)} type="button">Cancelar</button>
-            <button className={cn(miniButtonClass, "border-primary/40 bg-primary/15 text-primary-hover")} disabled={!newDate || !newConductorId} onClick={() => void confirmAdd()} type="button">
+            <button className={cn(miniButtonClass, "border-primary/40 bg-primary/15 text-primary-hover")} disabled={!newDate} onClick={confirmAdd} type="button">
               <Plus size={13} aria-hidden="true" />Agregar
             </button>
           </div>
         ) : null}
 
-        {controls.paged.map((entry) => {
-          const isSaturday = new Date(`${entry.service_date}T00:00:00Z`).getUTCDay() === 6;
-          return (
-            <div className="flex items-center gap-2.5 rounded-2xl bg-white/[0.03] px-3.5 py-3" key={entry.id}>
-              <span className={cn("inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-[10px] font-semibold uppercase", isSaturday ? "border-sky-400/25 bg-sky-500/10 text-sky-200" : "border-amber-400/25 bg-amber-500/10 text-amber-200")}>
-                {isSaturday ? "Sab" : "Dom"}
-              </span>
-              <p className="w-32 shrink-0 truncate text-sm font-medium text-white">{displayDateEs(entry.service_date)}</p>
-              <div className="w-48">
-                <Select
-                  onChange={(conductorId) => void mutate("upsertWeekendRoster", { service_date: entry.service_date, conductor_id: conductorId || null })}
-                  options={conductorOptions}
-                  size="compact"
-                  value={entry.conductor_id}
-                />
-              </div>
-              <DeleteButton onClick={() => void mutate("deleteRow", { table: "weekend_roster", id: entry.id })} />
+        {controls.paged.map((row) => (
+          <div className="rounded-2xl bg-white/[0.03] p-3" key={row.saturday}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <RosterDay conductors={conductors} date={row.saturday} entry={row.sat} groups={data.groups} label="Sabado" mutate={mutate} tone="sky" />
+              <RosterDay conductors={conductors} date={addDays(row.saturday, 1)} entry={row.sun} groups={data.groups} label="Domingo" mutate={mutate} tone="amber" />
             </div>
-          );
-        })}
+            <div className="mt-2 flex justify-end">
+              <button className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-rose-300" onClick={() => void clearWeekend(row)} type="button">
+                <Trash2 size={13} aria-hidden="true" />Quitar fin de semana
+              </button>
+            </div>
+          </div>
+        ))}
 
-        {!sortedRoster.length && !adding ? <EmptyState icon={<Users size={24} />} title="Todavia no hay conductores cargados" text="Agrega una fecha para empezar la lista." /> : null}
+        {!rows.length && !adding ? <EmptyState icon={<Users size={24} />} title="Todavia no hay fines de semana cargados" text="Agrega un fin de semana para asignar conductor o grupo a cada dia." /> : null}
       </div>
       <PaginationBar page={controls.page} pageSize={controls.pageSize} total={controls.total} totalPages={controls.totalPages} onPageChange={controls.setPage} />
     </Panel>
@@ -2716,6 +2772,7 @@ function WeeklyOutingSlotCard({
   const [hora, setHora] = useState(slot.hora ?? "");
   const [lugar, setLugar] = useState(slot.lugar ?? "");
   const [conductorId, setConductorId] = useState(slot.conductor_id ?? "");
+  const [groupId, setGroupId] = useState(slot.group_id ?? "");
   const [highlighted, setHighlighted] = useState(slot.highlighted);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const saveTimeout = useRef<number | undefined>(undefined);
@@ -2724,11 +2781,14 @@ function WeeklyOutingSlotCard({
     setHora(slot.hora ?? "");
     setLugar(slot.lugar ?? "");
     setConductorId(slot.conductor_id ?? "");
+    setGroupId(slot.group_id ?? "");
     setHighlighted(slot.highlighted);
-  }, [slot.id, slot.hora, slot.lugar, slot.conductor_id, slot.highlighted]);
+  }, [slot.id, slot.hora, slot.lugar, slot.conductor_id, slot.group_id, slot.highlighted]);
 
   useEffect(() => {
-    const dirty = hora !== (slot.hora ?? "") || lugar !== (slot.lugar ?? "") || conductorId !== (slot.conductor_id ?? "") || highlighted !== slot.highlighted;
+    // Outings born from a group's own response keep their group: only the others can switch it.
+    const groupDirty = !slot.group_response_id && groupId !== (slot.group_id ?? "");
+    const dirty = hora !== (slot.hora ?? "") || lugar !== (slot.lugar ?? "") || conductorId !== (slot.conductor_id ?? "") || groupDirty || highlighted !== slot.highlighted;
     if (!dirty) return;
     setStatus("saving");
     window.clearTimeout(saveTimeout.current);
@@ -2738,12 +2798,13 @@ function WeeklyOutingSlotCard({
         hora: hora || null,
         lugar: lugar || null,
         conductor_id: conductorId || null,
+        ...(groupDirty ? { group_id: groupId || null } : {}),
         highlighted,
       }).then(() => setStatus("saved"));
     }, 700);
     return () => window.clearTimeout(saveTimeout.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hora, lugar, conductorId, highlighted]);
+  }, [hora, lugar, conductorId, groupId, highlighted]);
 
   const sortedSlotTerritories = [...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order);
   const territoriesText = formatSlotTerritories(sortedSlotTerritories.map((entry) => ({ number: entry.territories?.number ?? "?", pendingLabels: entry.territory_rounds?.pending_block_labels, override: entry.display_override })));
@@ -2826,21 +2887,41 @@ function WeeklyOutingSlotCard({
       ) : null}
       {cancelled ? <p className="mt-1.5 text-xs font-medium text-rose-300">Salida cancelada</p> : null}
       {slot.is_zoom ? <p className="mt-1.5 text-xs font-medium text-sky-300">Salida por Zoom · se asigna un listado de teléfonos</p> : null}
-      {slot.group_id ? <p className="mt-1.5 text-xs font-medium text-primary">Salida por grupo: {data.groups.find((group) => group.id === slot.group_id)?.name ?? "Grupo"}</p> : null}
+      {slot.group_response_id ? <p className="mt-1.5 text-xs font-medium text-primary">Salida por grupo: {data.groups.find((group) => group.id === slot.group_id)?.name ?? "Grupo"}</p> : null}
 
-      <div className="mt-2 flex items-center gap-2">
-        <User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />
-        <Select
-          className="border-transparent bg-black/20 px-2 py-1"
-          onChange={setConductorId}
-          options={[{ value: "", label: "Sin conductor" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))]}
-          size="compact"
-          value={conductorId}
-        />
+      <div className="mt-2 flex items-start gap-2">
+        <User className="mt-1.5 shrink-0 text-slate-500" size={13} aria-hidden="true" />
+        {slot.group_response_id ? (
+          <Select
+            className="border-transparent bg-black/20 px-2 py-1"
+            onChange={setConductorId}
+            options={[{ value: "", label: "Sin conductor" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))]}
+            size="compact"
+            value={conductorId}
+          />
+        ) : (
+          <AssigneePicker
+            className="min-w-0 flex-1"
+            conductors={conductors}
+            groups={data.groups}
+            onChange={(next) => {
+              setConductorId(next.conductorId);
+              setGroupId(next.groupId);
+            }}
+            value={{ conductorId, groupId }}
+          />
+        )}
       </div>
-      {!conductorId && rosterEntry?.profiles ? (
-        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setConductorId(rosterEntry.conductor_id)} type="button">
-          <Wand2 size={12} aria-hidden="true" />Usar {rosterEntry.profiles.full_name} (roster)
+      {!conductorId && !groupId && rosterEntry && (rosterEntry.profiles || rosterEntry.group_id) ? (
+        <button
+          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
+          onClick={() => {
+            setConductorId(rosterEntry.conductor_id ?? "");
+            setGroupId(slot.group_response_id ? "" : rosterEntry.group_id ?? "");
+          }}
+          type="button"
+        >
+          <Wand2 size={12} aria-hidden="true" />Usar {rosterEntry.group_id ? `Grupo ${data.groups.find((group) => group.id === rosterEntry.group_id)?.name ?? ""}` : rosterEntry.profiles?.full_name} (roster)
         </button>
       ) : null}
 

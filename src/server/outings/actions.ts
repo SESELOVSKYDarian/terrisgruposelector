@@ -43,6 +43,7 @@ export const OUTING_ACTIONS = new Set([
   "switchSlotToZoom",
   "autoFillWeeklyOuting",
   "regenerateWeeklyOutingSlots",
+  "upsertWeekendRoster",
   "submitWeeklyOuting",
   "returnWeeklyOutingToDraft",
   "publishWeeklyOuting",
@@ -253,6 +254,28 @@ export async function handleOutingAction(action: string, payload: Payload, profi
       return ok({ filled: result.filled, skipped: result.skipped });
     }
 
+    if (action === "upsertWeekendRoster") {
+      const serviceDate = String(payload?.service_date ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return fail("Fecha inválida.", 422);
+      const weekday = new Date(`${serviceDate}T00:00:00Z`).getUTCDay();
+      if (weekday !== 6 && weekday !== 0) return fail("La fecha debe ser sábado o domingo.", 422);
+      const conductorId = text(payload?.conductor_id);
+      const groupId = text(payload?.group_id);
+      if (conductorId && groupId) return fail("Elegí un conductor o un grupo, no ambos.", 422);
+      if (!conductorId && !groupId) {
+        const { error } = await supabase.from("weekend_roster").delete().eq("service_date", serviceDate);
+        if (error) return fail(migrationHint(error.message));
+        return ok();
+      }
+      if (groupId) {
+        const { data: group } = await supabase.from("groups").select("id").eq("id", groupId).maybeSingle();
+        if (!group) return fail("El grupo no existe.", 422);
+      }
+      const { error } = await supabase.from("weekend_roster").upsert({ service_date: serviceDate, conductor_id: conductorId, group_id: groupId, updated_at: new Date().toISOString() }, { onConflict: "service_date" });
+      if (error) return fail(migrationHint(error.message.includes("group_id") || error.message.includes("conductor_id") ? `${error.message} Ejecutá supabase/fase-24-group-designation.sql y volvé a intentar.` : error.message));
+      return ok();
+    }
+
     if (action === "deleteWeeklyOuting") {
       const week = await loadWeek(supabase, String(payload?.id ?? ""));
       if (!week) return fail("Semana no encontrada.", 404);
@@ -325,7 +348,26 @@ export async function handleOutingAction(action: string, payload: Payload, profi
       if (payload?.conductor_id !== undefined) { after.conductor_id = text(payload.conductor_id); patch.conductor_id = after.conductor_id; }
       if (payload?.highlighted !== undefined) { after.highlighted = Boolean(payload.highlighted); patch.highlighted = after.highlighted; }
       if (payload?.note !== undefined) { after.note = text(payload.note); patch.note = after.note; }
-      const changed = changedSlotFields(before, after);
+      // Designated group (instead of a conductor). Outings born from a group's own response are edited there.
+      let groupBefore: string | null = null;
+      let groupAfter: string | null = null;
+      let groupChanged = false;
+      if (payload?.group_id !== undefined) {
+        const { data: current, error: currentError } = await supabase.from("weekly_outing_slots").select("group_id, group_response_id").eq("id", slot.id).single();
+        if (currentError) return fail(migrationHint(currentError.message));
+        if (current?.group_response_id) return fail("Esta salida la carga el grupo desde su respuesta: se edita desde ahí.", 409);
+        groupBefore = (current?.group_id as string | null) ?? null;
+        groupAfter = text(payload.group_id);
+        if (groupAfter) {
+          const { data: group } = await supabase.from("groups").select("id").eq("id", groupAfter).maybeSingle();
+          if (!group) return fail("El grupo no existe.", 422);
+          // A designated group replaces the conductor unless the caller says otherwise.
+          if (payload?.conductor_id === undefined) { after.conductor_id = null; patch.conductor_id = null; }
+        }
+        groupChanged = groupBefore !== groupAfter;
+        patch.group_id = groupAfter;
+      }
+      const changed = [...changedSlotFields(before, after), ...(groupChanged ? ["grupo"] : [])];
       const { error } = await supabase.from("weekly_outing_slots").update(patch).eq("id", slot.id);
       if (error) return fail(migrationHint(error.message));
       if (published && changed.length) {
@@ -336,8 +378,8 @@ export async function handleOutingAction(action: string, payload: Payload, profi
           entityType: "weekly_outing_slot",
           entityId: slot.id,
           metadata: { weekly_outing_id: week.id, slot_date: slot.slot_date },
-          before: Object.fromEntries(changedKeys.map((field) => [field, before[field]])),
-          after: Object.fromEntries(changedKeys.map((field) => [field, after[field]])),
+          before: { ...Object.fromEntries(changedKeys.map((field) => [field, before[field]])), ...(groupChanged ? { group_id: groupBefore } : {}) },
+          after: { ...Object.fromEntries(changedKeys.map((field) => [field, after[field]])), ...(groupChanged ? { group_id: groupAfter } : {}) },
         });
         await notifyPublishedSlotChange(ctx, week, { slot, kind: "updated", changed, conductorAfter: after.conductor_id !== undefined ? after.conductor_id : slot.conductor_id, stamp: now });
       }
