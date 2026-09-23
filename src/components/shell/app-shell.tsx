@@ -105,7 +105,7 @@ export function AppShell({
       transition={transition}
       aria-label="Navegación principal"
     >
-      <div className="flex h-16 items-center gap-2 border-b border-border px-3">
+      <div className={cn("flex items-center border-b border-border", collapsed && !mobile ? "flex-col gap-2 px-2 py-3" : "h-16 gap-2 px-3")}>
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5"><img alt="PR" className="h-full w-full object-contain" src="/PR.svg" /></span>
         {!collapsed || mobile ? <span className="min-w-0 flex-1 truncate text-sm font-semibold">PR Territorios</span> : null}
         <button className="shell-icon-button" onClick={() => setCommandPaletteOpen(true)} type="button" aria-label="Abrir paleta de comandos"><Search size={18} /></button>
