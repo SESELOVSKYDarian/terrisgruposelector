@@ -8,7 +8,7 @@ export function SubTabs<T extends string>({ tabs, value, onChange }: { tabs: { i
   return (
     <div className="flex gap-1 overflow-x-auto pb-1" role="tablist">
       {tabs.map((tab) => (
-        <button aria-selected={value === tab.id} className={tabClass(value === tab.id)} key={tab.id} onClick={() => onChange(tab.id)} role="tab" type="button">
+        <button aria-selected={value === tab.id} className={cn(tabClass(value === tab.id), "lg:w-auto")} key={tab.id} onClick={() => onChange(tab.id)} role="tab" type="button">
           {tab.label}
         </button>
       ))}
