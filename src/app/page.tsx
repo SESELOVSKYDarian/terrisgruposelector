@@ -96,7 +96,9 @@ type Profile = {
   email: string | null;
   group_id: string | null;
   groups?: Pick<Group, "name"> | null;
+  /** Legacy roles: kept only as a display fallback when the V2 read fails. */
   roles: Role[];
+  v2?: { appointment: string; capabilities: string[]; responsibilities: string[] } | null;
   active: boolean;
   must_change_password: boolean;
   approval_status: "pending" | "approved";
@@ -1126,7 +1128,7 @@ function WindowsPanel({
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
   setModal: (modal: ModalState) => void;
 }) {
-  const elderGroupIds = new Set(data.profiles.filter((profile) => profile.roles.includes("ANCIANO") && profile.active && profile.group_id).map((profile) => profile.group_id));
+  const elderGroupIds = new Set(data.profiles.filter((profile) => isElder(profile) && profile.active && profile.group_id).map((profile) => profile.group_id));
   const controls = useListControls({
     items: data.reservationWindows,
     searchText: (window) => window.name,
@@ -1343,6 +1345,26 @@ function roleLabel(role: Role) {
   return role === "ADMIN" ? "Super admin" : role === "CONDUCTOR" ? "Conductor" : role === "PUBLICADOR" ? "Publicador" : "Anciano";
 }
 
+const v2Labels: Record<string, string> = {
+  ANCIANO: "Anciano", SIERVO_MINISTERIAL: "Siervo ministerial", PUBLICADOR: "Publicador",
+  CONDUCTOR: "Conductor", PRECURSOR: "Precursor",
+  COORDINADOR: "Coordinador", SUPERINTENDENTE_SERVICIO: "Sup. de servicio", SIERVO_TERRITORIOS: "Siervo de territorios",
+  SUPERINTENDENTE_GRUPO: "Sup. de grupo", AUXILIAR_GRUPO: "Aux. de grupo",
+};
+
+/** Badges for the Rol column: the real V2 model (condición · características · responsabilidades). */
+function profileBadges(item: Profile) {
+  if (!item.v2) return item.roles.map((role) => ({ key: role, label: roleLabel(role), tone: "neutral" as const }));
+  return [
+    { key: item.v2.appointment, label: v2Labels[item.v2.appointment] ?? item.v2.appointment, tone: "neutral" as const },
+    ...item.v2.capabilities.map((value) => ({ key: value, label: v2Labels[value] ?? value, tone: "neutral" as const })),
+    ...item.v2.responsibilities.map((value) => ({ key: value, label: v2Labels[value] ?? value, tone: "accent" as const })),
+  ];
+}
+const hasCapability = (item: Profile, capability: string) => (item.v2 ? item.v2.capabilities.includes(capability) : item.roles.includes(capability as Role));
+const isElder = (item: Profile) => (item.v2 ? item.v2.appointment === "ANCIANO" : item.roles.includes("ANCIANO"));
+const isCoordinator = (item: Profile) => (item.v2 ? item.v2.responsibilities.includes("COORDINADOR") : item.roles.includes("ADMIN"));
+
 function UsersPanel({
   data,
   mutate,
@@ -1380,9 +1402,9 @@ function UsersPanel({
                 <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.email ?? "-"}</Cell>
                 <Cell>
                   <div className="flex flex-wrap gap-1">
-                    {item.roles.map((role) => (
-                      <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
-                        {roleLabel(role)}
+                    {profileBadges(item).map((badge) => (
+                      <Badge className={badge.tone === "accent" ? "border-primary/30 bg-primary/12 text-primary-hover" : "border-white/10 bg-white/[0.05] text-slate-300"} key={badge.key}>
+                        {badge.label}
                       </Badge>
                     ))}
                   </div>
@@ -1409,16 +1431,16 @@ function UsersPanel({
               <Cell>@{item.username}</Cell><Cell>{item.full_name}</Cell><Cell>{item.email ?? <span className="text-muted">Sin mail</span>}</Cell><Cell>{item.groups?.name ?? "-"}</Cell>
               <Cell>
                 <div className="flex flex-wrap gap-1">
-                  {item.roles.map((role) => (
-                    <Badge className="border-white/10 bg-white/[0.05] text-slate-300" key={role}>
-                      {roleLabel(role)}
+                  {profileBadges(item).map((badge) => (
+                    <Badge className={badge.tone === "accent" ? "border-primary/30 bg-primary/12 text-primary-hover" : "border-white/10 bg-white/[0.05] text-slate-300"} key={badge.key}>
+                      {badge.label}
                     </Badge>
                   ))}
                 </div>
               </Cell>
               <Cell>{item.active ? "Si" : "No"}</Cell>
               <Cell>{item.must_change_password ? <Badge className="border-amber-400/30 bg-amber-500/12 text-amber-200">Temporal</Badge> : <Badge className="border-emerald-400/30 bg-emerald-500/12 text-emerald-200">Activa</Badge>}</Cell>
-              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Permisos (condición, características, responsabilidades)" onClick={() => setPermissionsProfile(item)}><ShieldCheck size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.id !== data.profile.id ? <IconButton label="Entrar como este usuario" onClick={() => void onImpersonate(item.id)}><LogIn size={16} /></IconButton> : null}{!item.roles.includes("ADMIN") ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
+              <Actions><IconButton label="Editar" onClick={() => setModal({ type: "user", item })}><Edit3 size={16} /></IconButton><IconButton label="Permisos (condición, características, responsabilidades)" onClick={() => setPermissionsProfile(item)}><ShieldCheck size={16} /></IconButton><IconButton label="Cambiar contraseña" onClick={() => setModal({ type: "password", item })}><KeyRound size={16} /></IconButton>{item.id !== data.profile.id ? <IconButton label="Entrar como este usuario" onClick={() => void onImpersonate(item.id)}><LogIn size={16} /></IconButton> : null}{!isCoordinator(item) ? <DeleteButton onClick={() => void mutate("deleteUser", { id: item.id })} /> : null}</Actions>
             </tr>
           ))}
         </DataTable>
@@ -1970,8 +1992,9 @@ function ConductorVisitForm({
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>) => Promise<unknown>;
 }) {
-  const isAdmin = data.profile.roles.includes("ADMIN");
-  const conductors = useMemo(() => data.profiles.filter((item) => item.roles.includes("CONDUCTOR")), [data.profiles]);
+  const me = data.profiles.find((item) => item.id === data.profile.id);
+  const isAdmin = Boolean(me?.v2 ? me.v2.responsibilities.some((value) => ["COORDINADOR", "SIERVO_TERRITORIOS", "SUPERINTENDENTE_SERVICIO"].includes(value)) : data.profile.roles.includes("ADMIN"));
+  const conductors = useMemo(() => data.profiles.filter((item) => hasCapability(item, "CONDUCTOR")), [data.profiles]);
   const [pickedConductorId, setPickedConductorId] = useState("");
   const effectiveConductorId = isAdmin ? pickedConductorId : data.profile.id;
 
@@ -2170,7 +2193,7 @@ function TerritoryVisitEditModal({
 }) {
   const territoryId = item.territory_rounds?.territory_id ?? "";
   const territory = data.territories.find((t) => t.id === territoryId);
-  const conductors = useMemo(() => data.profiles.filter((p) => p.roles.includes("CONDUCTOR")), [data.profiles]);
+  const conductors = useMemo(() => data.profiles.filter((p) => hasCapability(p, "CONDUCTOR")), [data.profiles]);
   const [visitDate, setVisitDate] = useState(item.visit_date);
   const [conductorId, setConductorId] = useState(item.conductor_id);
   const [doneLabels, setDoneLabels] = useState<Set<string>>(new Set(item.done_labels));
@@ -2310,7 +2333,7 @@ function WeeklyPlanningEditor({
   );
   const [selectedId, setSelectedId] = useState(sortedOutings[0]?.id ?? "");
   const outing = sortedOutings.find((item) => item.id === selectedId) ?? sortedOutings[0];
-  const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
+  const conductors = data.profiles.filter((item) => hasCapability(item, "CONDUCTOR"));
   // Weeks created before the workflow existed carry no status: they are the live, published plan.
   const status: PlanningStatus = outing?.status ?? "PUBLISHED";
   const canEdit = outing ? canEditWeek(authority, status) : false;
@@ -2472,7 +2495,7 @@ function WeekendRosterPanel({
   data: AppData;
   mutate: (action: string, payload?: Record<string, unknown>, form?: HTMLFormElement) => Promise<unknown>;
 }) {
-  const conductors = data.profiles.filter((item) => item.roles.includes("CONDUCTOR"));
+  const conductors = data.profiles.filter((item) => hasCapability(item, "CONDUCTOR"));
   const sortedRoster = [...data.weekendRoster].sort((a, b) => a.service_date.localeCompare(b.service_date));
   const conductorOptions = [{ value: "", label: "Sin asignar" }, ...conductors.map((item) => ({ value: item.id, label: item.full_name }))];
   const controls = useListControls({

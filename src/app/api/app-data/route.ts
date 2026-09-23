@@ -348,9 +348,31 @@ export async function GET() {
       };
     });
 
+    // V2 (condición / características / responsabilidades) per profile, so lists can show and filter
+    // by the real model instead of the legacy roles. Bulk-read: 4 queries for everyone at once.
+    const profileIds = (profilesResult.data ?? []).map((item) => item.id as string);
+    const v2ByProfile = new Map<string, { appointment: string; capabilities: string[]; responsibilities: string[] }>();
+    if (profileIds.length) {
+      try {
+        const [appointments, capabilities, globals, groupsAssigned] = await Promise.all([
+          supabase.from("profile_appointments").select("profile_id, appointment").in("profile_id", profileIds),
+          supabase.from("profile_capabilities").select("profile_id, capability").in("profile_id", profileIds).eq("active", true),
+          supabase.from("profile_responsibilities").select("profile_id, responsibility").in("profile_id", profileIds).is("ended_at", null),
+          supabase.from("group_responsibility_assignments").select("profile_id, responsibility").in("profile_id", profileIds).is("ended_at", null),
+        ]);
+        const v2Error = [appointments.error, capabilities.error, globals.error, groupsAssigned.error].find(Boolean);
+        if (v2Error) throw new Error(v2Error.message); // never show everyone as Publicador because a read failed
+        for (const id of profileIds) v2ByProfile.set(id, { appointment: "PUBLICADOR", capabilities: [], responsibilities: [] });
+        for (const row of appointments.data ?? []) v2ByProfile.get(row.profile_id as string)!.appointment = row.appointment as string;
+        for (const row of capabilities.data ?? []) v2ByProfile.get(row.profile_id as string)!.capabilities.push(row.capability as string);
+        for (const row of [...(globals.data ?? []), ...(groupsAssigned.data ?? [])]) v2ByProfile.get(row.profile_id as string)!.responsibilities.push(row.responsibility as string);
+      } catch (cause) {
+        console.warn("No se pudieron leer los permisos V2 de los perfiles.", cause);
+      }
+    }
     const profiles = (profilesResult.data ?? []).map((item) => {
       const { profile_roles, ...rest } = item as typeof item & { profile_roles?: { role: string }[] };
-      return { ...rest, roles: (profile_roles ?? []).map((entry) => entry.role) };
+      return { ...rest, roles: (profile_roles ?? []).map((entry) => entry.role), v2: v2ByProfile.get(item.id as string) ?? null };
     });
 
     return ok({
