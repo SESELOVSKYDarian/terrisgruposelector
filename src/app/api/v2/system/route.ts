@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createAdminSupabaseClient, type SessionProfile } from "@/lib/server/auth";
+import { createAdminSupabaseClient, createMagicLoginToken, type SessionProfile } from "@/lib/server/auth";
 import { forbid, handle, parseBody, requireProfile } from "@/server/api";
 import { getLockDuration } from "@/server/buildings/activity";
 import { googleCredentialsConfigured, s13WritesEnabled } from "@/server/integrations/s13-target";
@@ -57,7 +57,8 @@ export async function POST(request: Request) {
     await requireSystemAccess(profile);
     const { payload } = await parseBody(request, body);
     try {
-      await sendMail(payload.to, "Correo de prueba - PR Territorios", otpEmailHtml("000000"));
+      // Real magic token for your own account, so the test shows the full design and the button actually works.
+      await sendMail(payload.to, "Correo de prueba - PR Territorios", otpEmailHtml("000000", createMagicLoginToken(profile.id)));
       return { sent: true, transport: smtpConfigured() ? "smtp" : "resend" };
     } catch (cause) {
       return { sent: false, transport: smtpConfigured() ? "smtp" : "resend", error: cause instanceof Error ? cause.message : "Error inesperado." };
