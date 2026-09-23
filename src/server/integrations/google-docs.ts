@@ -3,6 +3,7 @@ import "server-only";
 import { createSign } from "node:crypto";
 
 import type { DocsBodyContent } from "@/modules/s13/doc-table";
+import { normalizePrivateKey, normalizeServiceAccountEmail } from "@/modules/s13/private-key";
 
 const SCOPE = "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -17,22 +18,23 @@ function base64url(input: Buffer | string) {
   return Buffer.from(input).toString("base64url");
 }
 
-/** Vercel stores multi-line keys with literal "\n" and sometimes wraps them in quotes. */
-export function normalizePrivateKey(raw: string) {
-  return raw.trim().replace(/^"|"$/g, "").replace(/\\n/g, "\n");
-}
-
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
 /** Service-account OAuth (JWT bearer). No Google SDK: one signed assertion, one POST. */
 async function accessToken() {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key = process.env.GOOGLE_PRIVATE_KEY;
-  if (!email || !key) throw new GoogleApiError("Faltan las credenciales de Google.", 500);
+  if (!rawEmail || !key) throw new GoogleApiError("Faltan las credenciales de Google.", 500);
+  const email = normalizeServiceAccountEmail(rawEmail);
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${base64url(JSON.stringify({ iss: email, scope: SCOPE, aud: TOKEN_URL, iat: now, exp: now + 3600 }))}`;
-  const signature = createSign("RSA-SHA256").update(unsigned).sign(normalizePrivateKey(key));
+  let signature: Buffer;
+  try {
+    signature = createSign("RSA-SHA256").update(unsigned).sign(normalizePrivateKey(key));
+  } catch {
+    throw new GoogleApiError("GOOGLE_PRIVATE_KEY no es una clave privada válida. Copiá el campo private_key del archivo JSON de la cuenta de servicio completo, desde -----BEGIN PRIVATE KEY----- hasta -----END PRIVATE KEY-----.", 500);
+  }
   const response = await fetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${unsigned}.${base64url(signature)}` }) });
   const body = (await response.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error_description?: string };
   if (!response.ok || !body.access_token) throw new GoogleApiError(`Google rechazó las credenciales: ${body.error_description ?? response.status}`, response.status);
