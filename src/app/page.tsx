@@ -67,6 +67,8 @@ import {
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthority, type PlanningStatus, type SlotStatus } from "@/modules/outings/workflow";
+import { isoWeekdayOf, isWeekendIso, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
+import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/outings/place-suggestions";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
@@ -216,6 +218,7 @@ type DeparturePoint = {
   id: string;
   name: string;
   address: string;
+  kind?: PointKind;
   available_days: number[];
   departure_point_territories: {
     territory_id: string;
@@ -575,6 +578,7 @@ export default function Home() {
     "updateWeeklyOutingSlot",
     "setSlotTerritories",
     "autoFillWeeklyOuting",
+    "regenerateWeeklyOutingSlots",
     "upsertWeekendRoster",
   ]);
 
@@ -1272,14 +1276,15 @@ function DeparturePointsPanel({
   });
 
   return (
-    <Panel title="Puntos de salida" description="Casas de hermanos u otros lugares para salir a predicar. Los territorios asociados son los mas cercanos a esa zona, en orden — el generador automatico de Salidas semanales los usa para elegir bien." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
+    <Panel title="Puntos de salida" description="Casas o esquinas para salir a predicar. Sabados y domingos el generador prioriza las casas; entre semana usa esquinas (o una casa con ese dia marcado). Los territorios asociados son los mas cercanos, en orden." action={<AddButton onClick={() => setModal({ type: "departurePoint" })}>Punto</AddButton>}>
       <ListToolbar onQueryChange={controls.setQuery} placeholder="Buscar por nombre o direccion..." query={controls.query} />
-      <DataTable headers={["Nombre", "Direccion", "Dias", "Territorios cercanos (de mas a menos)", "Acciones"]}>
+      <DataTable headers={["Nombre", "Tipo", "Direccion", "Dias", "Territorios cercanos (de mas a menos)", "Acciones"]}>
         {controls.paged.map((point) => {
           const territories = [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order);
           return (
             <tr key={point.id}>
               <Cell>{point.name ? <strong>{point.name}</strong> : <span className="text-slate-500">Sin nombre</span>}</Cell>
+              <Cell><KindBadge kind={normalizePointKind(point.kind)} /></Cell>
               <Cell>{point.address}</Cell>
               <Cell>
                 {point.available_days.length ? (
@@ -2378,7 +2383,7 @@ function WeeklyPlanningEditor({
           <button
             className={secondaryButtonClass}
             onClick={() => void mutate("autoFillWeeklyOuting", { weekly_outing_id: outing.id })}
-            title="Completa los dias sin territorio con los que hace mas tiempo no se trabajan o los que quedaron a medias"
+            title="Completa solo las salidas sin territorio (no cambia las que ya tienen). Para cambiar un dia o una salida usa Regenerar."
             type="button"
           >
             <Wand2 size={16} aria-hidden="true" />Generar automatico
@@ -2603,14 +2608,26 @@ function WeeklyOutingDays({
                 <p className="text-xs text-slate-500">{displayDateEs(slotDate)}</p>
               </div>
               {readOnly ? null : (
-                <button
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-white/[0.05] text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
-                  onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
-                  title="Agregar salida"
-                  type="button"
-                >
-                  <Plus size={15} aria-hidden="true" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {slots.length ? (
+                    <button
+                      className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl bg-white/[0.05] px-2.5 text-xs font-medium text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
+                      onClick={() => void mutate("regenerateWeeklyOutingSlots", { weekly_outing_id: outing.id, slot_ids: slots.map((slot) => slot.id) })}
+                      title="Cambia el territorio y el lugar de las salidas de este dia por otra sugerencia. Los demas dias no se tocan."
+                      type="button"
+                    >
+                      <RefreshCw size={13} aria-hidden="true" />Regenerar dia
+                    </button>
+                  ) : null}
+                  <button
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-white/[0.05] text-slate-300 transition hover:bg-primary/15 hover:text-primary-hover"
+                    onClick={() => void mutate("createWeeklyOutingSlot", { weekly_outing_id: outing.id, slot_date: slotDate })}
+                    title="Agregar salida"
+                    type="button"
+                  >
+                    <Plus size={15} aria-hidden="true" />
+                  </button>
+                </div>
               )}
             </div>
             <div className="space-y-2.5">
@@ -2624,6 +2641,50 @@ function WeeklyOutingDays({
       })}
     </div>
   );
+}
+
+function slotPlaceOptions(data: AppData, slot: WeeklyOutingSlot): { options: PlaceOption[]; hasHouses: boolean } {
+  const week = data.weeklyOutings.find((item) => item.id === slot.weekly_outing_id);
+  const used = new Set<string>();
+  for (const other of week?.weekly_outing_slots ?? []) {
+    if (other.id === slot.id) continue;
+    for (const entry of other.weekly_outing_slot_territories) used.add(entry.territory_id);
+  }
+  const openRound = new Map(data.territoryRounds.filter((round) => !round.completed_on).map((round) => [round.territory_id, round]));
+  const lastCompleted = new Map(data.territoryProgress.map((progress) => [progress.territory_id, progress.last_completed_at ?? null]));
+  const priority = prioritizeTerritories(
+    data.territories.map((territory) => ({ id: territory.id, openSince: openRound.get(territory.id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(territory.id) ?? null })),
+  );
+  const points: SuggestionPoint[] = data.departurePoints.map((point) => ({
+    id: point.id,
+    name: point.name,
+    address: point.address,
+    kind: normalizePointKind(point.kind),
+    availableDays: point.available_days,
+    territoryIds: [...point.departure_point_territories].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territory_id),
+  }));
+  const current = matchPointByLugar(points, slot.lugar);
+  const numberOf = new Map(data.territories.map((territory) => [territory.id, territory.number]));
+  const options = suggestPoints({ points, priority, isoWeekday: isoWeekdayOf(slot.slot_date), usedTerritoryIds: used, excludePointIds: current ? new Set([current.id]) : undefined }, 6).map((option) => {
+    const round = openRound.get(option.territoryId);
+    const last = lastCompleted.get(option.territoryId);
+    const reason = round
+      ? `vuelta abierta desde ${displayDate(round.assigned_on)}${round.pending_block_labels.length ? ` (faltan ${formatPendingBlocks(round.pending_block_labels)})` : ""}`
+      : last
+        ? `ultima vez completado ${displayDate(last)}`
+        : "sin registro de haberse completado";
+    return {
+      pointId: option.point.id,
+      kind: option.point.kind,
+      lugar: pointLugar(option.point),
+      title: option.point.name.trim() || option.point.address,
+      territoryId: option.territoryId,
+      territoryRoundId: round?.id ?? null,
+      territoryNumber: numberOf.get(option.territoryId) ?? "?",
+      reason,
+    };
+  });
+  return { options, hasHouses: points.some((point) => point.kind === "CASA") };
 }
 
 function WeeklyOutingSlotCard({
@@ -2640,6 +2701,7 @@ function WeeklyOutingSlotCard({
   slot: WeeklyOutingSlot;
 }) {
   const [territoryModalOpen, setTerritoryModalOpen] = useState(false);
+  const [placesOpen, setPlacesOpen] = useState(false);
   const [hora, setHora] = useState(slot.hora ?? "");
   const [lugar, setLugar] = useState(slot.lugar ?? "");
   const [conductorId, setConductorId] = useState(slot.conductor_id ?? "");
@@ -2683,6 +2745,12 @@ function WeeklyOutingSlotCard({
     : undefined;
   const rosterEntry = data.weekendRoster.find((entry) => entry.service_date === slot.slot_date);
   const cancelled = slot.status === "CANCELADA";
+  const placeSuggestions = useMemo(() => (placesOpen ? slotPlaceOptions(data, slot) : null), [placesOpen, data, slot]);
+  async function pickPlace(option: PlaceOption) {
+    setLugar(option.lugar);
+    setPlacesOpen(false);
+    await mutate("setSlotTerritories", { slot_id: slot.id, territories: [{ territory_id: option.territoryId, territory_round_id: option.territoryRoundId, display_override: null }] });
+  }
   const weekStatus = data.weeklyOutings.find((week) => week.id === slot.weekly_outing_id)?.status ?? "PUBLISHED";
   // Turning a published outing into Zoom (rain) is the Superintendente de Servicio's call.
   const zoomAllowed = weekStatus !== "PUBLISHED" || data.planningAccess.canPublish;
@@ -2706,6 +2774,17 @@ function WeeklyOutingSlotCard({
         </span>
         <div className="flex items-center gap-1">
           <SaveStatus status={status} />
+          {!cancelled && !slot.is_zoom && !slot.group_id ? (
+            <button
+              aria-label="Sugerir otro territorio y lugar"
+              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-600 transition hover:text-primary"
+              onClick={() => void mutate("regenerateWeeklyOutingSlots", { weekly_outing_id: slot.weekly_outing_id, slot_ids: [slot.id] })}
+              title="Sugerir otro territorio y lugar para esta salida"
+              type="button"
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+            </button>
+          ) : null}
           <button
             aria-label="Destacar salida"
             className={cn("inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition", highlighted ? "text-primary" : "text-slate-600 hover:text-slate-300")}
@@ -2766,6 +2845,14 @@ function WeeklyOutingSlotCard({
         <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover" onClick={() => setLugar(departurePointLugar(suggestedPoint))} type="button">
           <Wand2 size={12} aria-hidden="true" />Usar {suggestedPoint.name || suggestedPoint.address}
         </button>
+      ) : null}
+      {!slot.is_zoom ? (
+        <button className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-foreground" onClick={() => setPlacesOpen((current) => !current)} type="button">
+          <MapPin size={12} aria-hidden="true" />{placesOpen ? "Ocultar lugares sugeridos" : "Ver otros lugares sugeridos"}
+        </button>
+      ) : null}
+      {placeSuggestions ? (
+        <PlaceSuggestions hasHouses={placeSuggestions.hasHouses} onClose={() => setPlacesOpen(false)} onPick={(option) => void pickPlace(option)} options={placeSuggestions.options} weekend={isWeekendIso(isoWeekdayOf(slot.slot_date))} />
       ) : null}
 
       <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-primary/30 hover:bg-primary/5" onClick={() => setTerritoryModalOpen(true)} type="button">
@@ -2879,6 +2966,7 @@ function DeparturePointModal({
   const [name, setName] = useState(item?.name ?? "");
   const [address, setAddress] = useState(item?.address ?? "");
   const [availableDays, setAvailableDays] = useState<number[]>(() => item?.available_days ?? []);
+  const [kind, setKind] = useState<PointKind>(() => normalizePointKind(item?.kind));
   const [territoryIds, setTerritoryIds] = useState<string[]>(
     () => [...(item?.departure_point_territories ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territory_id),
   );
@@ -2914,6 +3002,7 @@ function DeparturePointModal({
       id: item?.id,
       name,
       address,
+      kind,
       available_days: availableDays,
       territory_ids: territoryIds,
     });
@@ -2924,12 +3013,33 @@ function DeparturePointModal({
       <h2 className="text-xl font-semibold tracking-tight text-white">{item ? "Editar punto de salida" : "Nuevo punto de salida"}</h2>
 
       <div className="space-y-4">
+        <div>
+          <p className="text-sm font-medium text-slate-200">Tipo de punto</p>
+          <p className="mt-1 text-xs text-slate-400">Los sabados y domingos se prefieren las casas. Entre semana se usan esquinas, salvo una casa que tenga ese dia marcado abajo.</p>
+          <div className="mt-2 flex gap-1.5" role="radiogroup">
+            {pointKinds.map((option) => (
+              <button
+                aria-checked={kind === option}
+                className={cn(
+                  "min-h-9 cursor-pointer rounded-lg border px-4 text-sm font-medium transition",
+                  kind === option ? "border-primary/40 bg-primary/15 text-white" : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/18 hover:bg-white/[0.06]",
+                )}
+                key={option}
+                onClick={() => setKind(option)}
+                role="radio"
+                type="button"
+              >
+                {pointKindLabels[option]}
+              </button>
+            ))}
+          </div>
+        </div>
         <Field label="Nombre (opcional, solo para casas)"><input className={inputClass} onChange={(event) => setName(event.target.value)} placeholder="Ej. Casa de Fulano" value={name} /></Field>
         <Field label="Direccion / lugar"><input className={inputClass} onChange={(event) => setAddress(event.target.value)} placeholder="Ej. Calle 123, esquina..." required value={address} /></Field>
 
         <div>
           <p className="text-sm font-medium text-slate-200">Dias que se puede salir</p>
-          <p className="mt-1 text-xs text-slate-400">Sin marcar ninguno = sin definir, se puede usar cualquier dia.</p>
+          <p className="mt-1 text-xs text-slate-400">Sin marcar ninguno = sin definir, se puede usar cualquier dia (una casa, sin embargo, no se usa entre semana salvo que marques ese dia).</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {isoWeekdays.map((day) => {
               const active = availableDays.includes(day);

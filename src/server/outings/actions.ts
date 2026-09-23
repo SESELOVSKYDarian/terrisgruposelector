@@ -26,6 +26,7 @@ import {
   type AdminSupabase,
   type WeekRow,
 } from "./planning";
+import { autoFillWeek } from "./autofill";
 import { materializeTemplate } from "./recurring";
 import { assignPhoneNumbers, zoomAnnouncementDraft } from "@/server/telephone";
 
@@ -41,6 +42,7 @@ export const OUTING_ACTIONS = new Set([
   "setSlotZoom",
   "switchSlotToZoom",
   "autoFillWeeklyOuting",
+  "regenerateWeeklyOutingSlots",
   "submitWeeklyOuting",
   "returnWeeklyOutingToDraft",
   "publishWeeklyOuting",
@@ -186,7 +188,7 @@ async function transitionWeek(ctx: Ctx, weekId: string, transition: PlanningTran
   return ok({ status: target });
 }
 
-/** Used by the legacy autoFill block that still lives in the app-data route. */
+/** Authorizes editing a whole week (auto-fill / regenerate): returns a response when denied, null when allowed. */
 async function guardWeekEdit(ctx: Ctx, weekId: string, auditAction: string) {
   const week = await loadWeek(ctx.supabase, weekId);
   if (!week) return fail("Semana no encontrada.", 404);
@@ -197,10 +199,7 @@ async function guardWeekEdit(ctx: Ctx, weekId: string, auditAction: string) {
   return null;
 }
 
-/**
- * Returns a response when the action was handled (or denied). Returns null for
- * `autoFillWeeklyOuting`, which passed authorization and continues in the legacy route.
- */
+/** Returns a response when the action was handled (or denied), null when it is not an outing action. */
 export async function handleOutingAction(action: string, payload: Payload, profile: SessionProfile): Promise<Response | null> {
   if (!OUTING_ACTIONS.has(action)) return null;
   const supabase = createAdminSupabaseClient();
@@ -231,9 +230,27 @@ export async function handleOutingAction(action: string, payload: Payload, profi
     if (action === "returnWeeklyOutingToDraft") return transitionWeek(ctx, String(payload?.id ?? ""), "RETURN_TO_DRAFT");
     if (action === "publishWeeklyOuting") return transitionWeek(ctx, String(payload?.id ?? ""), "PUBLISH");
 
-    if (action === "autoFillWeeklyOuting") {
-      const denied = await guardWeekEdit(ctx, String(payload?.weekly_outing_id ?? ""), "WEEK_AUTOFILLED");
-      return denied;
+    if (action === "autoFillWeeklyOuting" || action === "regenerateWeeklyOutingSlots") {
+      const weekId = String(payload?.weekly_outing_id ?? "");
+      const regenerate = action === "regenerateWeeklyOutingSlots";
+      const slotIds = regenerate && Array.isArray(payload?.slot_ids) ? payload.slot_ids.map((id) => String(id)) : undefined;
+      if (regenerate && !slotIds?.length) return fail("Elegí qué salidas regenerar.", 422);
+      const denied = await guardWeekEdit(ctx, weekId, regenerate ? "WEEK_SLOTS_REGENERATED" : "WEEK_AUTOFILLED");
+      if (denied) return denied;
+      const result = await autoFillWeek(supabase, { weeklyOutingId: weekId, regenerateSlotIds: slotIds });
+      if ("error" in result) return fail(migrationHint(result.error), result.status ?? 500);
+      if (regenerate && result.filled === 0) return fail("No hay otra opción distinta disponible: los territorios y puntos cercanos ya están en uso o no aplican a ese día.", 409);
+      if (regenerate) {
+        const week = await loadWeek(supabase, weekId);
+        const stamp = new Date().toISOString();
+        for (const change of result.changes) {
+          const changedSlot = week?.status === "PUBLISHED" ? await loadSlot(supabase, change.slotId) : null;
+          if (week && changedSlot) {
+            await notifyPublishedSlotChange(ctx, week, { slot: changedSlot, kind: "updated", changed: change.lugarChanged ? ["lugar", "territorios"] : ["territorios"], conductorAfter: changedSlot.conductor_id, stamp });
+          }
+        }
+      }
+      return ok({ filled: result.filled, skipped: result.skipped });
     }
 
     if (action === "deleteWeeklyOuting") {

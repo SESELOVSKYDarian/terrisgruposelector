@@ -10,6 +10,7 @@ import {
 import { fail, ok } from "@/lib/server/responses";
 import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
+import { normalizePointKind } from "@/modules/outings/suggestions";
 import { recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
@@ -578,7 +579,6 @@ export async function POST(request: Request) {
 
     if (OUTING_ACTIONS.has(action)) {
       // Weekly planning is authorized by planning authority (V2), not by the legacy ADMIN role.
-      // A null result means the action passed authorization and continues below (autoFillWeeklyOuting).
       const outingResponse = await handleOutingAction(action, payload, profile);
       if (outingResponse) return outingResponse;
     } else {
@@ -829,6 +829,7 @@ export async function POST(request: Request) {
       const row = {
         name: String(payload?.name ?? "").trim(),
         address: String(payload?.address ?? "").trim(),
+        kind: normalizePointKind(payload?.kind),
         available_days: availableDays,
         updated_at: new Date().toISOString(),
       };
@@ -838,11 +839,11 @@ export async function POST(request: Request) {
       let pointId = String(payload?.id ?? "");
       if (action === "createDeparturePoint") {
         const { data: created, error } = await supabase.from("departure_points").insert(row).select("id").single();
-        if (error || !created) return fail(error?.message ?? "No se pudo crear el punto.");
+        if (error || !created) return fail(migrationMessage(error?.message ?? "No se pudo crear el punto."));
         pointId = created.id;
       } else {
         const { error } = await supabase.from("departure_points").update(row).eq("id", pointId);
-        if (error) return fail(error.message);
+        if (error) return fail(migrationMessage(error.message));
       }
 
       const { error: deleteError } = await supabase.from("departure_point_territories").delete().eq("departure_point_id", pointId);
@@ -1016,169 +1017,6 @@ export async function POST(request: Request) {
       if ((responsibilities ?? []).length) return fail("No se puede eliminar un usuario Coordinador.", 403);
       const { error } = await supabase.from("profiles").delete().eq("id", id);
       if (error) return fail(error.message);
-      return ok();
-    }
-
-    if (action === "autoFillWeeklyOuting") {
-      const weeklyOutingId = String(payload?.weekly_outing_id ?? "");
-      const { data: outing, error: outingError } = await supabase
-        .from("weekly_outings")
-        .select("starts_on")
-        .eq("id", weeklyOutingId)
-        .single();
-      if (outingError || !outing) return fail("Semana no encontrada.", 404);
-
-      const [territoriesResult, territoryRoundsResult, completedStatusesResult, existingSlotsResult, departurePointsResult] = await Promise.all([
-        supabase.from("territories").select("id").eq("active", true),
-        supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
-        supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
-        supabase.from("weekly_outing_slots").select("id,slot_date,lugar").eq("weekly_outing_id", weeklyOutingId),
-        supabase.from("departure_points").select("name,address,available_days,departure_point_territories(territory_id,sort_order)"),
-      ]);
-      const firstError = [territoriesResult.error, territoryRoundsResult.error, completedStatusesResult.error, existingSlotsResult.error, departurePointsResult.error].find(Boolean);
-      if (firstError) return fail(firstError.message);
-
-      const activeTerritoryIds = new Set((territoriesResult.data ?? []).map((territory) => territory.id));
-      const territoryIdsByAddress = new Map<string, string[]>();
-      const availableDaysByAddress = new Map<string, number[]>();
-      for (const point of departurePointsResult.data ?? []) {
-        const key = point.address.trim().toLowerCase();
-        const ids = [...(point.departure_point_territories ?? [])]
-          .sort((a, b) => a.sort_order - b.sort_order)
-          .map((entry) => entry.territory_id)
-          .filter((id) => activeTerritoryIds.has(id));
-        if (ids.length) territoryIdsByAddress.set(key, ids);
-        if (Array.isArray(point.available_days) && point.available_days.length) availableDaysByAddress.set(key, point.available_days);
-      }
-
-      const lastCompletedByTerritory = new Map<string, string>();
-      for (const status of completedStatusesResult.data ?? []) {
-        const blockRef = Array.isArray(status.blocks) ? status.blocks[0] : status.blocks;
-        const territoryId = blockRef?.territory_id;
-        if (!territoryId || !status.completed_on) continue;
-        const current = lastCompletedByTerritory.get(territoryId);
-        if (!current || status.completed_on > current) lastCompletedByTerritory.set(territoryId, status.completed_on);
-      }
-
-      const openRoundByTerritory = new Map<string, { id: string; assigned_on: string }>();
-      for (const round of territoryRoundsResult.data ?? []) {
-        if (round.completed_on) continue;
-        openRoundByTerritory.set(round.territory_id, { id: round.id, assigned_on: round.assigned_on });
-      }
-
-      const priorityTerritoryIds = (territoriesResult.data ?? [])
-        .map((territory) => ({
-          id: territory.id,
-          open: openRoundByTerritory.get(territory.id) ?? null,
-          lastCompleted: lastCompletedByTerritory.get(territory.id) ?? null,
-        }))
-        .sort((a, b) => {
-          if (Boolean(a.open) !== Boolean(b.open)) return a.open ? -1 : 1;
-          if (a.open && b.open) return a.open.assigned_on.localeCompare(b.open.assigned_on);
-          return (a.lastCompleted ?? "").localeCompare(b.lastCompleted ?? "");
-        })
-        .map((entry) => entry.id);
-
-      const existingSlots = existingSlotsResult.data ?? [];
-      const existingSlotIds = existingSlots.map((slot) => slot.id);
-      const { data: existingSlotTerritories, error: slotTerritoriesError } = existingSlotIds.length
-        ? await supabase.from("weekly_outing_slot_territories").select("slot_id,territory_id").in("slot_id", existingSlotIds)
-        : { data: [], error: null };
-      if (slotTerritoriesError) return fail(slotTerritoriesError.message);
-      const slotsWithTerritory = new Set((existingSlotTerritories ?? []).map((entry) => entry.slot_id));
-
-      // territorios ya usados en CUALQUIER salida de esta semana (no solo las que se van a completar ahora)
-      const usedTerritoryIds = new Set((existingSlotTerritories ?? []).map((entry) => entry.territory_id));
-
-      const territoryToPointAddress = new Map<string, string>();
-      const territoryToLugar = new Map<string, string>();
-      for (const point of departurePointsResult.data ?? []) {
-        for (const entry of point.departure_point_territories ?? []) {
-          if (!territoryToPointAddress.has(entry.territory_id) && activeTerritoryIds.has(entry.territory_id)) {
-            territoryToPointAddress.set(entry.territory_id, point.address);
-            territoryToLugar.set(entry.territory_id, point.name?.trim() ? `${point.address} - ${point.name}` : point.address);
-          }
-        }
-      }
-
-      const startsOn = outing.starts_on;
-      const days = Array.from({ length: 7 }, (_, index) => {
-        const date = new Date(`${startsOn}T00:00:00Z`);
-        date.setUTCDate(date.getUTCDate() + index);
-        return date.toISOString().slice(0, 10);
-      });
-
-      const targetSlots: { id: string; lugar: string | null; slot_date: string }[] = [];
-      for (const day of days) {
-        const daySlots = existingSlots.filter((slot) => slot.slot_date === day);
-        const emptySlots = daySlots.filter((slot) => !slotsWithTerritory.has(slot.id));
-        if (emptySlots.length) {
-          for (const slot of emptySlots) targetSlots.push({ id: slot.id, lugar: slot.lugar, slot_date: day });
-          continue;
-        }
-        if (daySlots.length === 0) {
-          const { data: created, error } = await supabase
-            .from("weekly_outing_slots")
-            .insert({ weekly_outing_id: weeklyOutingId, slot_date: day, sort_order: 0 })
-            .select("id,lugar")
-            .single();
-          if (error) return fail(error.message);
-          if (created) targetSlots.push({ id: created.id, lugar: created.lugar, slot_date: day });
-        }
-      }
-
-      function isDayEligible(territoryId: string, isoWeekday: number): boolean {
-        const address = territoryToPointAddress.get(territoryId);
-        if (!address) return true;
-        const days = availableDaysByAddress.get(address.trim().toLowerCase());
-        if (!days || !days.length) return true;
-        return days.includes(isoWeekday);
-      }
-
-      function pickTerritory(avoidAddress: string | null, isoWeekday: number): string | null {
-        const candidates = priorityTerritoryIds.filter((id) => !usedTerritoryIds.has(id));
-        const dayEligible = candidates.filter((id) => isDayEligible(id, isoWeekday));
-        const pool = dayEligible.length ? dayEligible : candidates;
-        let fallback: string | null = null;
-        for (const id of pool) {
-          const address = territoryToPointAddress.get(id) ?? null;
-          if (!avoidAddress || !address || address !== avoidAddress) return id;
-          if (fallback === null) fallback = id;
-        }
-        return fallback;
-      }
-
-      const lastAddressByDay = new Map<string, string>();
-
-      for (const slot of targetSlots) {
-        const preAddressKey = slot.lugar ? slot.lugar.trim().toLowerCase() : null;
-        const nearby = preAddressKey ? territoryIdsByAddress.get(preAddressKey) : undefined;
-        const jsWeekday = new Date(`${slot.slot_date}T00:00:00Z`).getUTCDay();
-        const isoWeekday = jsWeekday === 0 ? 7 : jsWeekday;
-
-        const territoryId = nearby?.find((id) => !usedTerritoryIds.has(id))
-          ?? pickTerritory(preAddressKey ? null : lastAddressByDay.get(slot.slot_date) ?? null, isoWeekday);
-        if (!territoryId) break;
-        usedTerritoryIds.add(territoryId);
-
-        const resolvedAddress = slot.lugar || territoryToPointAddress.get(territoryId) || null;
-        const resolvedLugar = slot.lugar || territoryToLugar.get(territoryId) || null;
-        if (resolvedAddress) lastAddressByDay.set(slot.slot_date, resolvedAddress);
-
-        if (!slot.lugar && resolvedLugar) {
-          const { error: slotUpdateError } = await supabase.from("weekly_outing_slots").update({ lugar: resolvedLugar }).eq("id", slot.id);
-          if (slotUpdateError) return fail(slotUpdateError.message);
-        }
-
-        const { error } = await supabase.from("weekly_outing_slot_territories").insert({
-          slot_id: slot.id,
-          territory_id: territoryId,
-          territory_round_id: openRoundByTerritory.get(territoryId)?.id ?? null,
-          sort_order: 0,
-        });
-        if (error) return fail(error.message);
-      }
-
       return ok();
     }
 
