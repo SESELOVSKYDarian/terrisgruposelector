@@ -53,7 +53,7 @@ export function SystemSettings() {
   const rows: { label: string; ok: boolean; hint: string }[] = [
     { label: "Avisos push", ok: integrations.push, hint: "Claves VAPID" },
     { label: "Recordatorios automáticos", ok: integrations.cron, hint: "CRON_SECRET + un cron que llame a /api/cron/reminders" },
-    { label: "Correo (registro y OTP)", ok: integrations.email, hint: "RESEND_API_KEY" },
+    { label: "Correo (registro y OTP)", ok: integrations.email, hint: "SMTP_HOST/SMTP_USER/SMTP_PASSWORD, o RESEND_API_KEY" },
     { label: "Google Docs · credenciales", ok: integrations.googleCredentials, hint: "Cuenta de servicio" },
     { label: "Google Docs · escritura", ok: integrations.googleWrites, hint: "S13_GOOGLE_WRITE_ENABLED (apagada por defecto)" },
   ];

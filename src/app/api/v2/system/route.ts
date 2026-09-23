@@ -2,6 +2,7 @@ import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { forbid, handle, requireProfile } from "@/server/api";
 import { getLockDuration } from "@/server/buildings/activity";
 import { googleCredentialsConfigured, s13WritesEnabled } from "@/server/integrations/s13-target";
+import { smtpConfigured } from "@/lib/server/mail";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 import { getPublicVapidKey } from "@/server/push";
 import { getTerritoryAccess } from "@/server/territories/access";
@@ -32,7 +33,7 @@ export async function GET() {
         googleCredentials: googleCredentialsConfigured(),
         googleWrites: s13WritesEnabled(),
         cron: Boolean(process.env.CRON_SECRET),
-        email: Boolean(process.env.RESEND_API_KEY),
+        email: smtpConfigured() || Boolean(process.env.RESEND_API_KEY),
       },
     };
   });

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createTransport } from "nodemailer";
 import { Resend } from "resend";
 
 function getResend() {
@@ -8,10 +9,36 @@ function getResend() {
   return new Resend(apiKey);
 }
 
+/**
+ * SMTP transport for a real mailbox you already own (e.g. no-reply@tudominio.com via el webmail
+ * del hosting). No domain verification needed in a third party: the mailbox's own mail server
+ * already has its DKIM/SPF sorted out. Cached across invocations; nodemailer pools connections.
+ */
+let smtpTransport: ReturnType<typeof createTransport> | null = null;
+function getSmtpTransport() {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD;
+  if (!host || !user || !pass) throw new Error("Faltan SMTP_HOST, SMTP_USER o SMTP_PASSWORD.");
+  if (!smtpTransport) {
+    const port = Number(process.env.SMTP_PORT ?? 587);
+    smtpTransport = createTransport({ host, port, secure: process.env.SMTP_SECURE === "true" || port === 465, auth: { user, pass } });
+  }
+  return smtpTransport;
+}
+
+export function smtpConfigured() {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+}
+
+/** SMTP wins when configured (it's your own mailbox: no sandbox restrictions); Resend is the fallback. */
 export async function sendMail(to: string, subject: string, html: string) {
   const from = process.env.EMAIL_FROM ?? "PR Territorios <no-responder@resend.dev>";
-  const resend = getResend();
-  const { error } = await resend.emails.send({ from, to, subject, html });
+  if (smtpConfigured()) {
+    await getSmtpTransport().sendMail({ from, to, subject, html });
+    return;
+  }
+  const { error } = await getResend().emails.send({ from, to, subject, html });
   if (error) throw new Error(error.message);
 }
 
