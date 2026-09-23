@@ -134,14 +134,19 @@ export type SuggestInput = {
   slotTurno?: Turno | null;
 };
 
-/** Every option for one slot, best first. `options[0]` is what auto-fill picks. */
-export function suggestOptions(input: SuggestInput): Suggestion[] {
+function makeScorer(input: Pick<SuggestInput, "priority" | "isoWeekday" | "history" | "slotTurno">) {
   const rank = new Map(input.priority.map((id, index) => [id, index]));
-  const weekend = isWeekendIso(input.isoWeekday);
-  const free = (id: string) => rank.has(id) && !input.usedTerritoryIds.has(id) && !input.excludeTerritoryIds?.has(id);
   const varietyFor = (id: string): Variety => varietyOf(input.history?.get(id), input.isoWeekday, input.slotTurno ?? null);
   // A territory that would repeat its last weekday + turno goes after every other candidate.
   const scoreOf = (id: string) => (varietyFor(id) === 2 ? 1_000_000 : 0) + rank.get(id)! + (varietyFor(id) === 1 ? sameWeekdayPenalty : 0);
+  return { rank, varietyFor, scoreOf };
+}
+
+/** Every option for one slot, best first. `options[0]` is what auto-fill picks. */
+export function suggestOptions(input: SuggestInput): Suggestion[] {
+  const { rank, varietyFor, scoreOf } = makeScorer(input);
+  const weekend = isWeekendIso(input.isoWeekday);
+  const free = (id: string) => rank.has(id) && !input.usedTerritoryIds.has(id) && !input.excludeTerritoryIds?.has(id);
 
   type Scored = Suggestion & { tier: number; closeness: number; label: string; score: number };
   const scored: Scored[] = [];
@@ -186,4 +191,36 @@ export function suggestOptions(input: SuggestInput): Suggestion[] {
 /** Distinct meeting points worth showing for a day (drops the "territory only" fallbacks). */
 export function suggestPoints(input: SuggestInput, limit = 6) {
   return suggestOptions(input).filter((option): option is Suggestion & { point: SuggestionPoint } => option.point !== null).slice(0, limit);
+}
+
+export const WEEKEND_MIN_TERRITORIES = 2;
+export const WEEKEND_MAX_TERRITORIES = 3;
+export const WEEKEND_TARGET_BLOCKS = 8;
+
+/** Extra territories to pair with the chosen one: the ones near its meeting point first, then by need. */
+export function companionCandidates(input: SuggestInput & { point: SuggestionPoint | null; picked: readonly string[] }): string[] {
+  const { rank, scoreOf } = makeScorer(input);
+  const near = new Set(input.point?.territoryIds ?? []);
+  return input.priority
+    .filter((id) => rank.has(id) && !input.usedTerritoryIds.has(id) && !input.excludeTerritoryIds?.has(id) && !input.picked.includes(id))
+    .sort((a, b) => (near.has(a) ? 0 : 1) - (near.has(b) ? 0 : 1) || scoreOf(a) - scoreOf(b));
+}
+
+/**
+ * Weekend outings carry 2 or 3 territories, enough to reach about 8 blocks: a second territory is
+ * always added, a third only while the total is still under the target.
+ */
+export function assembleTerritories(input: { first: string; candidates: readonly string[]; blocksOf: (territoryId: string) => number; min?: number; max?: number; targetBlocks?: number }): string[] {
+  const min = input.min ?? WEEKEND_MIN_TERRITORIES;
+  const max = input.max ?? WEEKEND_MAX_TERRITORIES;
+  const target = input.targetBlocks ?? WEEKEND_TARGET_BLOCKS;
+  const picked = [input.first];
+  let total = input.blocksOf(input.first);
+  for (const id of input.candidates) {
+    if (picked.length >= max) break;
+    if (picked.length >= min && total >= target) break;
+    picked.push(id);
+    total += input.blocksOf(id);
+  }
+  return picked;
 }

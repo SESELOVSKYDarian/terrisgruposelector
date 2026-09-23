@@ -1,6 +1,9 @@
 import "server-only";
 
 import {
+  assembleTerritories,
+  companionCandidates,
+  isWeekendIso,
   isoWeekdayOf,
   lastOccurrences,
   matchPointByLugar,
@@ -37,7 +40,7 @@ export async function autoFillWeek(
 
   const [territoriesResult, roundsResult, completedResult, slotsResult, pointsResult, annualResult, blocksResult] = await Promise.all([
     supabase.from("territories").select("id").eq("active", true),
-    supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
+    supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on,pending_block_labels"),
     supabase.from("block_round_statuses").select("completed_on,block_id,annual_round_id,blocks(territory_id)").eq("status", "COMPLETED"),
     supabase.from("weekly_outing_slots").select("*").eq("weekly_outing_id", weeklyOutingId),
     supabase.from("departure_points").select("*, departure_point_territories(territory_id,sort_order)"),
@@ -68,9 +71,9 @@ export async function autoFillWeek(
     const current = lastCompleted.get(territoryId);
     if (!current || (status.completed_on as string) > current) lastCompleted.set(territoryId, status.completed_on as string);
   }
-  const openRound = new Map<string, { id: string; assigned_on: string }>();
+  const openRound = new Map<string, { id: string; assigned_on: string; pending: number }>();
   for (const round of roundsResult.data ?? []) {
-    if (!round.completed_on) openRound.set(round.territory_id as string, { id: round.id as string, assigned_on: round.assigned_on as string });
+    if (!round.completed_on) openRound.set(round.territory_id as string, { id: round.id as string, assigned_on: round.assigned_on as string, pending: ((round.pending_block_labels as string[] | null) ?? []).length });
   }
   // "Done this round" = every active block of the territory is COMPLETED in the open annual round.
   const activeRoundId = (annualResult.data?.[0]?.id as string | undefined) ?? null;
@@ -86,6 +89,8 @@ export async function autoFillWeek(
     const blocks = blocksByTerritory.get(territoryId);
     return Boolean(activeRoundId && blocks?.size && [...blocks].every((id) => completedBlocksThisRound.has(id)));
   };
+  // Blocks a territory brings to an outing: what is still pending of an open round, else all of them.
+  const blocksOf = (territoryId: string) => (openRound.get(territoryId)?.pending || blocksByTerritory.get(territoryId)?.size) ?? 0;
   const priority = prioritizeTerritories(
     [...activeTerritoryIds].map((id) => ({ id, openSince: openRound.get(id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(id) ?? null, doneInRound: doneInRound(id) })),
   );
@@ -184,19 +189,22 @@ export async function autoFillWeek(
       skipped += 1;
       continue;
     }
-    used.add(choice.territoryId);
+    // Saturdays and Sundays carry 2-3 territories (about 8 blocks); weekdays keep one.
+    let territoryIds = [choice.territoryId];
+    if (isWeekendIso(isoWeekday)) {
+      const candidates = companionCandidates({ points, priority, isoWeekday, usedTerritoryIds: used, excludeTerritoryIds, history, slotTurno, point: choice.point, picked: [choice.territoryId] });
+      territoryIds = assembleTerritories({ first: choice.territoryId, candidates, blocksOf });
+    }
+    for (const id of territoryIds) used.add(id);
     if (choice.point) dayPoints.set(slot.slot_date, new Set([...sameDay, choice.point.id]));
 
     const newLugar = keepLugar ? slot.lugar : choice.point ? pointLugar(choice.point) : null;
     const lugarChanged = newLugar !== slot.lugar;
 
-    // New territory goes in before the old ones come out, so a failure never leaves the outing empty.
-    const { error: insertError } = await supabase.from("weekly_outing_slot_territories").insert({
-      slot_id: slot.id,
-      territory_id: choice.territoryId,
-      territory_round_id: openRound.get(choice.territoryId)?.id ?? null,
-      sort_order: 0,
-    });
+    // New territories go in before the old ones come out, so a failure never leaves the outing empty.
+    const { error: insertError } = await supabase.from("weekly_outing_slot_territories").insert(
+      territoryIds.map((territoryId, index) => ({ slot_id: slot.id, territory_id: territoryId, territory_round_id: openRound.get(territoryId)?.id ?? null, sort_order: index })),
+    );
     if (insertError) return { error: insertError.message };
     if (regenerating && previousTerritories.length) {
       const { error: deleteError } = await supabase.from("weekly_outing_slot_territories").delete().eq("slot_id", slot.id).in("territory_id", previousTerritories);

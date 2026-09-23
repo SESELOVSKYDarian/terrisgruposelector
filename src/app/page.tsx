@@ -69,6 +69,7 @@ import { cn } from "@/lib/utils";
 import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthority, type PlanningStatus, type SlotStatus } from "@/modules/outings/workflow";
 import { isoWeekdayOf, isWeekendIso, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, turnoLabels, turnoOf, type Occurrence, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
 import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/outings/place-suggestions";
+import { formatSlotTerritories } from "@/modules/outings/territory-text";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
@@ -2455,7 +2456,7 @@ function PublishedPlanningView({ data }: { data: AppData }) {
                   </div>
                   {slots.map((slot) => {
                     const cancelled = slot.status === "CANCELADA";
-                    const territories = [...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order).map((entry) => entry.territories?.number ?? "?");
+                    const territoriesText = formatSlotTerritories([...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order).map((entry) => ({ number: entry.territories?.number ?? "?", pendingLabels: entry.territory_rounds?.pending_block_labels, override: entry.display_override })));
                     return (
                       <div className={cn("rounded-2xl p-3", slot.highlighted ? "bg-primary/[0.09]" : "bg-black/15", cancelled && "opacity-60")} key={slot.id}>
                         <div className="flex items-center justify-between gap-2">
@@ -2466,9 +2467,9 @@ function PublishedPlanningView({ data }: { data: AppData }) {
                         </div>
                         {slot.lugar ? <p className="mt-1.5 flex items-center gap-2 text-sm text-slate-300"><MapPin className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.lugar}</p> : null}
                         {slot.profiles?.full_name ? <p className="mt-1 flex items-center gap-2 text-sm text-slate-300"><User className="shrink-0 text-slate-500" size={13} aria-hidden="true" />{slot.profiles.full_name}</p> : null}
-                        {territories.length ? (
+                        {territoriesText ? (
                           <div className="mt-2 flex flex-wrap gap-1.5">
-                            {territories.map((number, index) => <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>Territorio {number}</span>)}
+                            <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200">Territorios {territoriesText}</span>
                           </div>
                         ) : null}
                         <DoNotVisitWarning items={warningsForTerritories(data.doNotVisit, new Map(data.territories.map((territory) => [territory.id, territory.number])), slot.weekly_outing_slot_territories.map((entry) => entry.territory_id))} />
@@ -2745,11 +2746,7 @@ function WeeklyOutingSlotCard({
   }, [hora, lugar, conductorId, highlighted]);
 
   const sortedSlotTerritories = [...slot.weekly_outing_slot_territories].sort((a, b) => a.sort_order - b.sort_order);
-  const territories = sortedSlotTerritories.map((entry) => {
-    const number = entry.territories?.number ?? "?";
-    const pending = entry.territory_rounds?.pending_block_labels ?? [];
-    return pending.length ? `${number}(${formatPendingBlocks(pending)})` : `${number}`;
-  });
+  const territoriesText = formatSlotTerritories(sortedSlotTerritories.map((entry) => ({ number: entry.territories?.number ?? "?", pendingLabels: entry.territory_rounds?.pending_block_labels, override: entry.display_override })));
   const suggestedPoint = sortedSlotTerritories.length
     ? data.departurePoints.find((point) => point.departure_point_territories.some((entry) => entry.territory_id === sortedSlotTerritories[0].territory_id))
     : undefined;
@@ -2866,9 +2863,9 @@ function WeeklyOutingSlotCard({
       ) : null}
 
       <button className="mt-2 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-white/12 px-2.5 py-1.5 text-left transition hover:border-primary/30 hover:bg-primary/5" onClick={() => setTerritoryModalOpen(true)} type="button">
-        {territories.length ? territories.map((text, index) => (
-          <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200" key={index}>{text}</span>
-        )) : (
+        {territoriesText ? (
+          <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-slate-200">{territoriesText}</span>
+        ) : (
           <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><MapIcon size={13} aria-hidden="true" />Elegir territorios</span>
         )}
       </button>

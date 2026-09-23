@@ -322,7 +322,7 @@ export async function GET() {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const { data: published, error: publishedError } = await supabase
         .from("weekly_outings")
-        .select("id, starts_on, status, weekly_outing_slots(id, weekly_outing_id, slot_date, sort_order, hora, lugar, conductor_id, highlighted, note, status, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(id, slot_id, territory_id, sort_order, display_override, territories(number)))")
+        .select("id, starts_on, status, weekly_outing_slots(id, weekly_outing_id, slot_date, sort_order, hora, lugar, conductor_id, highlighted, note, status, profiles!conductor_id(full_name,username), weekly_outing_slot_territories(id, slot_id, territory_id, sort_order, display_override, territories(number), territory_rounds(pending_block_labels)))")
         .eq("status", "PUBLISHED")
         .gte("starts_on", cutoff)
         .order("starts_on", { ascending: true });
