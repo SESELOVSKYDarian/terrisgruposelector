@@ -749,7 +749,7 @@ export default function Home() {
       <AppShell access={shellAccess} activeView={activeView} impersonating={impersonating} onChange={changeView} onCreateOuting={isPlanner ? () => void createOutingFromPalette() : undefined} onEndImpersonation={() => void endImpersonation()} onLogout={logout} user={profile}>
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
         {["account", "appearance", "notifications", "devices", "shortcuts"].includes(activeView) ? (
-          <PersonalSettings person={{ full_name: profile.full_name, username: profile.username, email: profile.email, roles: profile.roles }} view={activeView} />
+          <PersonalSettings person={{ full_name: profile.full_name, username: profile.username, email: profile.email, roles: (() => { const me = data.profiles.find((item) => item.id === profile.id); return me ? profileBadges(me).map((badge) => badge.label) : profile.roles.map((role) => roleLabel(role)); })() }} view={activeView} />
         ) : activeView === "outings" ? (
           <div className="view-transition min-w-0" key="outings">
             <WeeklyOutingsPanel data={data} mutate={mutate} setModal={setModal} />

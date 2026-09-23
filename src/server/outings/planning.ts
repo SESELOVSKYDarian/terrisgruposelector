@@ -131,9 +131,6 @@ export async function listConductors(supabase: AdminSupabase, options: { groupId
   const ids = new Set<string>();
   const capabilities = await supabase.from("profile_capabilities").select("profile_id").eq("capability", "CONDUCTOR").eq("active", true);
   if (!capabilities.error) for (const row of capabilities.data ?? []) ids.add(row.profile_id as string);
-  const legacy = await supabase.from("profile_roles").select("profile_id").in("role", ["CONDUCTOR", "ADMIN"]);
-  if (legacy.error) throw new Error(legacy.error.message);
-  for (const row of legacy.data ?? []) ids.add(row.profile_id as string);
   if (!ids.size) return [];
   let query = supabase.from("profiles").select("id, full_name, group_id").in("id", [...ids]).eq("active", true).order("full_name");
   if (options.groupId) query = query.eq("group_id", options.groupId);

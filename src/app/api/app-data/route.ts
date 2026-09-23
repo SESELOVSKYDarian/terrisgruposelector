@@ -15,6 +15,23 @@ import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 import { blockStatuses, reservationStatuses, roles, type Role } from "@/lib/domain";
 
+/** What this caller may do, from V2 only (Permisos). Replaces the old profile.roles checks. */
+async function v2Access(profile: { id: string; roles: readonly string[] }) {
+  let context: Awaited<ReturnType<typeof getFreshPermissionContext>> = null;
+  try {
+    context = await getFreshPermissionContext(profile.id);
+  } catch (cause) {
+    console.warn("No se pudo leer el modelo de permisos V2.", cause);
+  }
+  const has = (permission: Parameters<typeof hasPermission>[1]) => Boolean(context && hasPermission(context, permission));
+  const planning = await getPlanningAuthority(profile as Parameters<typeof getPlanningAuthority>[0]);
+  return {
+    isAdmin: has("MANAGE_USERS") || has("MANAGE_SYSTEM") || has("MANAGE_TERRITORIES") || planning.canPlan || planning.canPublish,
+    isConductor: Boolean(context?.capabilities.includes("CONDUCTOR")),
+    isElder: Boolean(context && (context.appointment === "ANCIANO" || context.groupResponsibilities.length > 0)),
+  };
+}
+
 const userManagementActions = new Set(["createUser", "updateUser", "approveUser", "deleteUser"]);
 
 /** Creating, editing, approving or deleting a user is Coordinador-only (MANAGE_USERS) — this was
@@ -173,7 +190,7 @@ async function getReservationForChange(
     ? data.reservation_windows[0]
     : data.reservation_windows;
 
-  if (!profile.roles.includes("ADMIN")) {
+  if (!(await v2Access(profile)).isAdmin) {
     if (data.responsible_user_id !== profile.id) throw new Error("No puedes modificar una reserva ajena.");
     if (!windowData || isPastDeadline(windowData.booking_deadline)) {
       throw new Error("La fecha limite de esta ventana ya paso.");
@@ -187,8 +204,9 @@ export async function GET() {
   try {
     const profile = await requireProfile();
     const supabase = createAdminSupabaseClient();
-    const isAdmin = profile.roles.includes("ADMIN");
-    const canSeeBlocks = isAdmin || profile.roles.includes("CONDUCTOR");
+    const access = await v2Access(profile);
+    const isAdmin = access.isAdmin;
+    const canSeeBlocks = isAdmin || access.isConductor;
     const planning = await getPlanningAuthority(profile);
     const isPlanner = planning.canPlan || planning.canPublish;
 
@@ -424,7 +442,7 @@ export async function POST(request: Request) {
         ? createReservationSchema.safeParse(payload)
         : updateReservationSchema.safeParse(payload);
       if (!result.success) return fail("Completa el territorio y el lugar de salida.", 422);
-      if (!profile.roles.includes("ANCIANO")) return fail("Las respuestas de ventana corresponden a los ancianos.", 403);
+      if (!(await v2Access(profile)).isElder) return fail("Las respuestas de ventana corresponden a los ancianos.", 403);
       if (!profile.group_id) return fail("Tu usuario no tiene un grupo asignado. Contacta al administrador.", 422);
 
       const { data: windowData, error: windowError } = await supabase
@@ -494,15 +512,16 @@ export async function POST(request: Request) {
       const id = String(payload?.id);
       await getReservationForChange(id, profile);
       const query = supabase.from("territory_reservations").delete().eq("id", id);
-      if (!profile.roles.includes("ADMIN")) query.eq("responsible_user_id", profile.id);
+      if (!(await v2Access(profile)).isAdmin) query.eq("responsible_user_id", profile.id);
       const { error } = await query;
       if (error) return fail(error.message);
       return ok();
     }
 
     if (action === "submitTerritoryVisit") {
-      const isAdminCaller = profile.roles.includes("ADMIN");
-      const isConductorCaller = profile.roles.includes("CONDUCTOR");
+      const callerAccess = await v2Access(profile);
+      const isAdminCaller = callerAccess.isAdmin;
+      const isConductorCaller = callerAccess.isConductor;
       if (!isAdminCaller && !isConductorCaller) return fail("Esta accion es solo para conductores.", 403);
 
       const result = territoryVisitSchema.safeParse(payload);

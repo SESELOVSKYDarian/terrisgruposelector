@@ -113,7 +113,7 @@ export function PersonalSettings({ view, person }: { view: string; person: Perso
         <dt className="text-muted">Nombre</dt><dd className="text-foreground">{person.full_name}</dd>
         <dt className="text-muted">Usuario</dt><dd className="text-foreground">{person.username}</dd>
         <dt className="text-muted">Correo</dt><dd className="text-foreground">{person.email ?? "—"}</dd>
-        <dt className="text-muted">Roles</dt><dd className="text-foreground">{person.roles.join(", ") || "—"}</dd>
+        <dt className="text-muted">Permisos</dt><dd className="text-foreground">{person.roles.join(", ") || "—"}</dd>
       </dl>
     </Card>
   );

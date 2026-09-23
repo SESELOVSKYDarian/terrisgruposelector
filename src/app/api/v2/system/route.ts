@@ -12,12 +12,12 @@ export const runtime = "nodejs";
 
 async function requireSystemAccess(profile: SessionProfile) {
   const territories = await getTerritoryAccess(profile);
-  let canSystem = profile.roles.includes("ADMIN");
+  let canSystem = false;
   try {
     const context = await getFreshPermissionContext(profile.id);
     canSystem = Boolean(context && hasPermission(context, "MANAGE_SYSTEM"));
   } catch {
-    // V2 permission tables pending: legacy ADMIN keeps access.
+    // V2 permission tables unreadable: no system access (fail closed).
   }
   if (!canSystem && !territories.canManage) forbid("No tenés acceso a los ajustes del sistema.");
   return territories;
