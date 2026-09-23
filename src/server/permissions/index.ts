@@ -93,7 +93,24 @@ export function assertPermission(context: FreshPermissionContext, permission: Pe
  * Reads the permission model directly from the database. The signed session
  * cookie identifies the caller but is never used as an authorization source.
  */
-export async function getFreshPermissionContext(profileId: string): Promise<FreshPermissionContext | null> {
+const contextTtlMs = 2000;
+const contextMemo = new Map<string, { at: number; value: Promise<FreshPermissionContext | null> }>();
+
+/** One request calls this from several helpers; the 2s memo collapses them into one read. */
+export function getFreshPermissionContext(profileId: string): Promise<FreshPermissionContext | null> {
+  const cached = contextMemo.get(profileId);
+  if (cached && Date.now() - cached.at < contextTtlMs) return cached.value;
+  const value = loadPermissionContext(profileId);
+  contextMemo.set(profileId, { at: Date.now(), value });
+  value.catch(() => contextMemo.delete(profileId));
+  return value;
+}
+
+export function invalidatePermissionContext(profileId: string) {
+  contextMemo.delete(profileId);
+}
+
+async function loadPermissionContext(profileId: string): Promise<FreshPermissionContext | null> {
   const supabase = createAdminSupabaseClient();
   const [profileResult, appointmentResult, capabilityResult, globalResult, groupResult] = await Promise.all([
     supabase.from("profiles").select("id, active, profile_roles(role)").eq("id", profileId).maybeSingle(),

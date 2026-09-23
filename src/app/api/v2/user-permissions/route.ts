@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
-import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
+import { getFreshPermissionContext, hasPermission, invalidatePermissionContext } from "@/server/permissions";
 import { getStructuredPermissions, setStructuredPermissions } from "@/server/users/permissions";
 
 export const runtime = "nodejs";
@@ -30,6 +30,10 @@ export async function POST(request: Request) {
     await requireManageUsers(profile.id);
     const { profileId, permissions } = await parseBody(request, body);
     const supabase = createAdminSupabaseClient();
-    return { permissions: await setStructuredPermissions(supabase, profile.id, profileId, permissions) };
+    try {
+      return { permissions: await setStructuredPermissions(supabase, profile.id, profileId, permissions) };
+    } finally {
+      invalidatePermissionContext(profileId);
+    }
   });
 }
