@@ -92,6 +92,8 @@ create table public.territory_rounds (
   completed_on date,
   pending_block_labels text[] not null default '{}',
   done_block_labels text[] not null default '{}',
+  doc_slot smallint,          -- columna 0-3 del Google Doc donde vive esta vuelta (ver §2.bis)
+  doc_synced_at timestamptz,  -- último sync exitoso contra el Google Doc
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -142,6 +144,34 @@ si algo queda pendiente:
 
 ---
 
+## 2.bis. El formulario también escribe en los Google Docs originales
+
+Confirmaste que además de guardar en Supabase, cada envío del formulario tiene que reflejarse en los dos Docs reales que ya armaste con el formato S-13 original:
+
+- Territorios 1-20: `docs.google.com/document/d/1oP_nbrEeGYJddAZrzcIOe6t2A9jJAwVmj1oIfLNXk58`
+- Territorios 21-36: `docs.google.com/document/d/1Yr5dKQc1ADRYQDkUqcpug1zpDc1ryb7sJF5yC65t8S8`
+
+Es decir, `territory_rounds` en Supabase pasa a ser la fuente de verdad que alimenta la lógica de la app (Salidas semanales, el propio formulario, etc.), pero cada cambio se replica en la tabla del Doc para que siga siendo, además, el registro humano-legible de siempre — mismo diseño de 8 columnas por fila de fechas que ya reverse-engenieé la vez pasada (`Territorio | Última fecha completada | Conductor 1..4` en la fila de arriba, `Fecha asignada/completada 1..4` en la fila de abajo).
+
+**Por qué esto ya no puede ser Apps Script:** el formulario ahora vive en el backend de Next.js (Vercel), no en Google. Así que la escritura al Doc se hace desde el propio servidor de la app, llamando a la **Google Docs API** (paquete `googleapis` de npm) con una **cuenta de servicio** de Google Cloud:
+
+1. Crear un proyecto en Google Cloud (o reusar uno), habilitar "Google Docs API", crear una cuenta de servicio y descargar su clave JSON.
+2. Compartir los dos Google Docs con el email de esa cuenta de servicio, como Editor (igual que se comparte un Doc con una persona).
+3. Guardar `GOOGLE_SERVICE_ACCOUNT_EMAIL` y `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` como variables de entorno (en `.env.local` y en Vercel).
+4. Nuevo módulo `src/lib/server/google-docs-sync.ts` con la función `syncTerritoryRoundToDoc(round)`.
+
+**Cómo escribe la celda correcta (a diferencia de Apps Script, la Docs API no tiene `DocumentApp`, todo es por índices de texto):**
+- `documents.get(docId)` trae el documento completo en JSON; se recorre `body.content` buscando la tabla grande (la segunda, igual que antes) y, dentro de ella, la fila cuya primera celda dice el número de territorio — misma lógica que `buscarFilasTerritorio` del script viejo, adaptada a la estructura JSON de la Docs API en vez de `DocumentApp`.
+- Para decidir en qué de las 4 columnas de conductor escribir (`doc_slot`), se reusa la misma regla del script anterior: primer slot vacío; si los 4 ya están ocupados, se corren todos un lugar a la izquierda (se pierde el conductor más viejo, igual que antes) y se usa el último. El `doc_slot` elegido se guarda en `territory_rounds.doc_slot` la primera vez que esa vuelta se sincroniza, así las actualizaciones siguientes (cerrar la fecha completada) ya saben exactamente qué celda tocar sin tener que re-derivar el slot.
+- Reemplazar el texto de una celda puntual se hace con un `batchUpdate` que borra el rango de texto actual de esa celda (`deleteContentRange`) e inserta el nuevo (`insertText`) en su `startIndex` — dos requests por celda a actualizar, agrupadas en un solo `batchUpdate` por sincronización para que sea una sola llamada atómica.
+- La columna "Última fecha completada" (a nivel territorio, no por ronda) se actualiza también cada vez que una vuelta se cierra.
+
+**Cuándo se dispara:** dentro de la misma acción `submitTerritoryVisit` (punto 4), inmediatamente después de guardar en Supabase — mismo request, no un job aparte. Si la escritura al Doc falla (Google caído, permisos, etc.) **no se revierte el guardado en Supabase** — el dato real de la app queda guardado igual — pero la respuesta al conductor incluye un aviso tipo "Se guardó, pero no se pudo actualizar el Doc de Google; se reintentará" y queda marcado (`doc_synced_at` null) para que un job de reintento o el propio Admin lo vuelva a sincronizar a mano después. Esto evita que un problema de Google bloquee el uso normal de la app.
+
+**Nota:** esto agrega una dependencia real a la disponibilidad y cuotas de la API de Google desde cada envío del formulario — es la forma correcta de cumplir "que también se complete el Doc", pero vale aclararlo como una pieza más para mantener (si algún día se decide no depender más de los Docs, se apaga solo comentando la llamada a `syncTerritoryRoundToDoc`, sin tocar el resto).
+
+---
+
 ## 3. Formulario del Conductor
 
 Nueva vista `ConductorVisitForm`, visible para cualquier perfil con `roles.includes("CONDUCTOR")` (según el punto 1).
@@ -167,7 +197,7 @@ Se agrega una acción más al mismo patrón que ya usa la app (`POST /api/app-da
 
 - `action: "submitTerritoryVisit"`, payload `{territory_id, visit_date, done_labels, pending_labels}`.
 - Requiere `profile.roles.includes("CONDUCTOR")` (no requiere ser Anciano ni Admin).
-- Implementa la lógica del punto 2.
+- Implementa la lógica del punto 2, guarda en `territory_rounds`/`territory_visits` y **después llama a `syncTerritoryRoundToDoc`** (punto 2.bis) antes de responder, devolviendo un aviso si ese paso falló.
 - `GET /api/app-data` también necesita devolver, para estos perfiles, la lista de territorios + su vuelta abierta actual (algo como `territoryRounds: {territory_id, conductor_id, assigned_on, pending_block_labels}[]`), del mismo modo que hoy ya arma `territoryProgress` para la vista de reservas.
 
 ---
@@ -232,17 +262,18 @@ create table public.weekly_outing_slot_territories (
 ## 6. Orden de implementación sugerido
 
 1. Migración de roles (`profile_roles`, tipos, `auth.ts`, cookie) + UI de usuarios con checkboxes. Probar que un usuario Conductor-only puede loguearse y ve la pantalla vacía correcta antes de seguir.
-2. Tabla `territory_rounds` (+ `territory_visits` opcional) + acción `submitTerritoryVisit` + `GET /api/app-data` extendido.
-3. `BlockToggleGrid` compartido + `ConductorVisitForm` + enrutamiento del shell según roles (punto 1, última parte).
-4. Tablas `weekly_outings` / `weekly_outing_slots` / `weekly_outing_slot_territories` + pestaña de Admin con el CRUD completo.
-5. Deploy: conectar el repo a un proyecto de Vercel (si no lo está ya) con las mismas variables de entorno que pide el README (`SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWT_SECRET`, `SESSION_SECRET`, `SUPER_ADMIN_*`).
+2. Tabla `territory_rounds` (+ `territory_visits` opcional) + acción `submitTerritoryVisit` + `GET /api/app-data` extendido — probado primero **sin** el sync a Docs (para no mezclar dos fuentes de bugs a la vez).
+3. Cuenta de servicio de Google, compartir los dos Docs, variables de entorno, y `google-docs-sync.ts` (punto 2.bis) — conectado a `submitTerritoryVisit` una vez que el paso 2 ya esté probado y estable.
+4. `BlockToggleGrid` compartido + `ConductorVisitForm` + enrutamiento del shell según roles (punto 1, última parte).
+5. Tablas `weekly_outings` / `weekly_outing_slots` / `weekly_outing_slot_territories` + pestaña de Admin con el CRUD completo.
+6. Deploy: conectar el repo a un proyecto de Vercel (si no lo está ya) con las mismas variables de entorno que pide el README (`SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWT_SECRET`, `SESSION_SECRET`, `SUPER_ADMIN_*`) más las dos nuevas de Google del paso 3.
 
 ## 7. Cosas que quedan fuera de este alcance (a menos que lo pidas)
 
 - No se modifica el flujo de "Ventanas"/reservas de sábado-domingo de los Ancianos.
 - No se toca `annual_rounds`/vuelta global ni la vista de progreso que usan las reservas.
-- No se recrea una "vista S-13" de 4 rondas por territorio dentro de la app (los documentos de Google Docs viejos quedan como estaban); si la querés como pantalla de consulta dentro del sitio, se puede armar después a partir de `territory_rounds` sin cambios de esquema.
-- Los dos Google Docs y el Apps Script de la iteración anterior quedan obsoletos con este enfoque — se pueden borrar cuando quieras, ya no hace falta mantenerlos sincronizados.
+- No se recrea una "vista S-13" de 4 rondas por territorio dentro de la app (para consultarlo se sigue abriendo el Google Doc, que ahora queda sincronizado automáticamente — punto 2.bis); si más adelante lo querés también como pantalla dentro del sitio, se puede armar a partir de `territory_rounds` sin cambios de esquema.
+- El Apps Script viejo (`territorios_script.gs`, el formulario HTML standalone) queda obsoleto y se puede borrar — el rol de "escribir en el Doc" lo pasa a cumplir la app Next.js directamente (punto 2.bis), los Docs en sí siguen usándose y en adelante se actualizan solos.
 
 ## 8. Para confirmar antes de programar
 
@@ -250,3 +281,4 @@ create table public.weekly_outing_slot_territories (
 2. Significado exacto de `*` y `Cont` en la columna Terr. de Salidas semanales (§5) — mientras tanto quedan como texto editable a mano.
 3. Si el proyecto ya está conectado a Vercel o hay que conectarlo de cero.
 4. Si un Admin que también es Conductor debería ver el formulario de visita dentro del panel de Admin (lo dejé como opcional/no bloqueante).
+5. Confirmar que estás de acuerdo con crear una cuenta de servicio de Google Cloud para el sync automático a los Docs (§2.bis) — es la única forma de escribir en un Google Doc desde un servidor sin que un humano tenga la sesión abierta; implica compartir los dos Docs con el email de esa cuenta de servicio.
