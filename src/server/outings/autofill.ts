@@ -2,11 +2,14 @@ import "server-only";
 
 import {
   isoWeekdayOf,
+  lastOccurrences,
   matchPointByLugar,
   normalizePointKind,
   pointLugar,
   prioritizeTerritories,
   suggestOptions,
+  turnoOf,
+  type Occurrence,
   type Suggestion,
   type SuggestionPoint,
 } from "@/modules/outings/suggestions";
@@ -16,7 +19,39 @@ export type AutoFillChange = { slotId: string; slotDate: string; lugarChanged: b
 export type AutoFillResult = { filled: number; skipped: number; changes: AutoFillChange[] };
 export type AutoFillFailure = { error: string; status?: number };
 
-type SlotRow = { id: string; slot_date: string; sort_order: number; lugar: string | null; status?: string | null; is_zoom?: boolean | null; group_id?: string | null };
+type SlotRow = { id: string; slot_date: string; sort_order: number; hora?: string | null; lugar: string | null; status?: string | null; is_zoom?: boolean | null; group_id?: string | null };
+
+const HISTORY_DAYS = 120;
+
+/**
+ * When and at which turno each territory was last worked, from earlier weeks' outings that actually
+ * ran (published, not cancelled). Best effort: if the planning columns are not migrated yet, the
+ * variety rule is simply skipped instead of blocking the fill.
+ */
+async function loadLastOccurrences(supabase: AdminSupabase, startsOn: string): Promise<Map<string, Occurrence>> {
+  const cutoff = new Date(`${startsOn}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - HISTORY_DAYS);
+  const { data, error } = await supabase
+    .from("weekly_outing_slot_territories")
+    .select("territory_id, weekly_outing_slots!inner(slot_date, hora, status, weekly_outings!inner(status))")
+    .lt("weekly_outing_slots.slot_date", startsOn)
+    .gte("weekly_outing_slots.slot_date", cutoff.toISOString().slice(0, 10));
+  if (error) {
+    console.warn("No se pudo leer el historial de salidas para variar los días:", error.message);
+    return new Map();
+  }
+  type Row = { territory_id: string; weekly_outing_slots: { slot_date: string; hora: string | null; status: string | null; weekly_outings: { status: string | null } | { status: string | null }[] | null } | null };
+  const entries: { territoryId: string; date: string; hora: string | null }[] = [];
+  for (const row of (data ?? []) as unknown as Row[]) {
+    const slot = row.weekly_outing_slots;
+    if (!slot || slot.status === "CANCELADA") continue;
+    const week = Array.isArray(slot.weekly_outings) ? slot.weekly_outings[0] : slot.weekly_outings;
+    // Weeks created before the workflow existed carry no status: they are the live plan.
+    if (week?.status && week.status !== "PUBLISHED") continue;
+    entries.push({ territoryId: row.territory_id, date: slot.slot_date, hora: slot.hora });
+  }
+  return lastOccurrences(entries);
+}
 
 /**
  * Fills a week's outings with the territory (and meeting point) that best fits each day.
@@ -32,14 +67,17 @@ export async function autoFillWeek(
   const { data: outing, error: outingError } = await supabase.from("weekly_outings").select("starts_on").eq("id", weeklyOutingId).single();
   if (outingError || !outing) return { error: "Semana no encontrada.", status: 404 };
 
-  const [territoriesResult, roundsResult, completedResult, slotsResult, pointsResult] = await Promise.all([
+  const [territoriesResult, roundsResult, completedResult, slotsResult, pointsResult, annualResult, blocksResult, history] = await Promise.all([
     supabase.from("territories").select("id").eq("active", true),
     supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on"),
-    supabase.from("block_round_statuses").select("completed_on,blocks(territory_id)").eq("status", "COMPLETED"),
+    supabase.from("block_round_statuses").select("completed_on,block_id,annual_round_id,blocks(territory_id)").eq("status", "COMPLETED"),
     supabase.from("weekly_outing_slots").select("*").eq("weekly_outing_id", weeklyOutingId),
     supabase.from("departure_points").select("*, departure_point_territories(territory_id,sort_order)"),
+    supabase.from("annual_rounds").select("id").eq("status", "OPEN").limit(1),
+    supabase.from("blocks").select("id,territory_id").eq("active", true),
+    loadLastOccurrences(supabase, outing.starts_on as string),
   ]);
-  const firstError = [territoriesResult.error, roundsResult.error, completedResult.error, slotsResult.error, pointsResult.error].find(Boolean);
+  const firstError = [territoriesResult.error, roundsResult.error, completedResult.error, slotsResult.error, pointsResult.error, annualResult.error, blocksResult.error].find(Boolean);
   if (firstError) return { error: firstError.message };
 
   const activeTerritoryIds = new Set((territoriesResult.data ?? []).map((territory) => territory.id as string));
@@ -67,8 +105,22 @@ export async function autoFillWeek(
   for (const round of roundsResult.data ?? []) {
     if (!round.completed_on) openRound.set(round.territory_id as string, { id: round.id as string, assigned_on: round.assigned_on as string });
   }
+  // "Done this round" = every active block of the territory is COMPLETED in the open annual round.
+  const activeRoundId = (annualResult.data?.[0]?.id as string | undefined) ?? null;
+  const blocksByTerritory = new Map<string, Set<string>>();
+  for (const block of blocksResult.data ?? []) {
+    blocksByTerritory.set(block.territory_id as string, (blocksByTerritory.get(block.territory_id as string) ?? new Set()).add(block.id as string));
+  }
+  const completedBlocksThisRound = new Set<string>();
+  for (const status of completedResult.data ?? []) {
+    if (activeRoundId && status.annual_round_id === activeRoundId) completedBlocksThisRound.add(status.block_id as string);
+  }
+  const doneInRound = (territoryId: string) => {
+    const blocks = blocksByTerritory.get(territoryId);
+    return Boolean(activeRoundId && blocks?.size && [...blocks].every((id) => completedBlocksThisRound.has(id)));
+  };
   const priority = prioritizeTerritories(
-    [...activeTerritoryIds].map((id) => ({ id, openSince: openRound.get(id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(id) ?? null })),
+    [...activeTerritoryIds].map((id) => ({ id, openSince: openRound.get(id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(id) ?? null, doneInRound: doneInRound(id) })),
   );
 
   const existingSlots = (slotsResult.data ?? []) as SlotRow[];
@@ -135,7 +187,8 @@ export async function autoFillWeek(
     const sameDay = dayPoints.get(slot.slot_date) ?? new Set<string>();
     const ownExclusions = regenerating && previousPoint ? new Set([previousPoint.id]) : new Set<string>();
     const excludeTerritoryIds = regenerating ? new Set(previousTerritories) : undefined;
-    const pick = (excludePointIds: Set<string>, pool: readonly SuggestionPoint[]) => suggestOptions({ points: pool, priority, isoWeekday, usedTerritoryIds: used, excludeTerritoryIds, excludePointIds })[0] as Suggestion | undefined;
+    const slotTurno = turnoOf(slot.hora);
+    const pick = (excludePointIds: Set<string>, pool: readonly SuggestionPoint[]) => suggestOptions({ points: pool, priority, isoWeekday, usedTerritoryIds: used, excludeTerritoryIds, excludePointIds, history, slotTurno })[0] as Suggestion | undefined;
 
     let choice: Suggestion | undefined;
     let keepLugar = false;

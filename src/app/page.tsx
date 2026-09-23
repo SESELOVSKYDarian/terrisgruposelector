@@ -67,7 +67,7 @@ import {
 } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { canDeleteWeek, canEditWeek, canPerformTransition, type PlanningAuthority, type PlanningStatus, type SlotStatus } from "@/modules/outings/workflow";
-import { isoWeekdayOf, isWeekendIso, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
+import { isoWeekdayOf, isWeekendIso, lastOccurrences, matchPointByLugar, normalizePointKind, pointKinds, pointKindLabels, pointLugar, prioritizeTerritories, suggestPoints, turnoLabels, turnoOf, type PointKind, type SuggestionPoint } from "@/modules/outings/suggestions";
 import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/outings/place-suggestions";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
 import { Select } from "./_components/select";
@@ -2652,8 +2652,15 @@ function slotPlaceOptions(data: AppData, slot: WeeklyOutingSlot): { options: Pla
   }
   const openRound = new Map(data.territoryRounds.filter((round) => !round.completed_on).map((round) => [round.territory_id, round]));
   const lastCompleted = new Map(data.territoryProgress.map((progress) => [progress.territory_id, progress.last_completed_at ?? null]));
+  const doneInRound = new Set(data.territoryProgress.filter((progress) => progress.total_blocks > 0 && progress.completed_blocks >= progress.total_blocks).map((progress) => progress.territory_id));
   const priority = prioritizeTerritories(
-    data.territories.map((territory) => ({ id: territory.id, openSince: openRound.get(territory.id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(territory.id) ?? null })),
+    data.territories.map((territory) => ({ id: territory.id, openSince: openRound.get(territory.id)?.assigned_on ?? null, lastCompleted: lastCompleted.get(territory.id) ?? null, doneInRound: doneInRound.has(territory.id) })),
+  );
+  // When/at which turno each territory was last worked: earlier published weeks, outings not cancelled.
+  const history = lastOccurrences(
+    data.weeklyOutings
+      .filter((item) => week && item.starts_on < week.starts_on && (!item.status || item.status === "PUBLISHED"))
+      .flatMap((item) => item.weekly_outing_slots.filter((other) => other.status !== "CANCELADA").flatMap((other) => other.weekly_outing_slot_territories.map((entry) => ({ territoryId: entry.territory_id, date: other.slot_date, hora: other.hora })))),
   );
   const points: SuggestionPoint[] = data.departurePoints.map((point) => ({
     id: point.id,
@@ -2665,14 +2672,19 @@ function slotPlaceOptions(data: AppData, slot: WeeklyOutingSlot): { options: Pla
   }));
   const current = matchPointByLugar(points, slot.lugar);
   const numberOf = new Map(data.territories.map((territory) => [territory.id, territory.number]));
-  const options = suggestPoints({ points, priority, isoWeekday: isoWeekdayOf(slot.slot_date), usedTerritoryIds: used, excludePointIds: current ? new Set([current.id]) : undefined }, 6).map((option) => {
+  const options = suggestPoints({ points, priority, isoWeekday: isoWeekdayOf(slot.slot_date), usedTerritoryIds: used, excludePointIds: current ? new Set([current.id]) : undefined, history, slotTurno: turnoOf(slot.hora) }, 6).map((option) => {
     const round = openRound.get(option.territoryId);
     const last = lastCompleted.get(option.territoryId);
-    const reason = round
-      ? `vuelta abierta desde ${displayDate(round.assigned_on)}${round.pending_block_labels.length ? ` (faltan ${formatPendingBlocks(round.pending_block_labels)})` : ""}`
-      : last
-        ? `ultima vez completado ${displayDate(last)}`
-        : "sin registro de haberse completado";
+    const before = history.get(option.territoryId);
+    const need = doneInRound.has(option.territoryId)
+      ? "ya hecho en esta vuelta"
+      : round
+        ? `vuelta abierta desde ${displayDate(round.assigned_on)}${round.pending_block_labels.length ? ` (faltan ${formatPendingBlocks(round.pending_block_labels)})` : ""}`
+        : last
+          ? `ultima vez completado ${displayDate(last)}`
+          : "sin registro de haberse completado";
+    const beforeText = before ? ` · antes salio el ${isoWeekdayLabels[before.isoWeekday]?.toLowerCase()}${before.turno ? ` ${turnoLabels[before.turno]}` : ""}${option.variety === 2 ? " (se repite)" : ""}` : "";
+    const reason = `${need}${beforeText}`;
     return {
       pointId: option.point.id,
       kind: option.point.kind,
