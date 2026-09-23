@@ -12,7 +12,18 @@ import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority } from "@/server/outings/planning";
 import { recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
+import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 import { blockStatuses, reservationStatuses, roles, type Role } from "@/lib/domain";
+
+const userManagementActions = new Set(["createUser", "updateUser", "approveUser", "deleteUser"]);
+
+/** Creating, editing, approving or deleting a user is Coordinador-only (MANAGE_USERS) — this was
+ * missing entirely, so any authenticated profile could call these actions directly. */
+async function assertCanManageUsers(profile: { id: string; roles: readonly string[] }) {
+  if (profile.roles.includes("ADMIN")) return; // legacy bridge, kept until every admin has a real Coordinador row
+  const context = await getFreshPermissionContext(profile.id);
+  if (!context || !hasPermission(context, "MANAGE_USERS")) throw new Error("No tenés permiso para administrar usuarios.");
+}
 
 export const runtime = "nodejs";
 
@@ -378,6 +389,14 @@ export async function POST(request: Request) {
       action: string;
       payload?: Record<string, unknown>;
     };
+
+    if (userManagementActions.has(action)) {
+      try {
+        await assertCanManageUsers(profile);
+      } catch (cause) {
+        return fail(cause instanceof Error ? cause.message : "No tenés permiso para administrar usuarios.", 403);
+      }
+    }
 
     if (action === "createReservation" || action === "updateReservation") {
       const result = action === "createReservation"
@@ -873,9 +892,11 @@ export async function POST(request: Request) {
       const passwordMode = String(payload?.passwordMode);
       const temporaryPassword = passwordMode === "generate" ? generateTemporaryPassword() : String(payload?.password ?? "");
       if (temporaryPassword.length < 8) return fail("La contraseña debe tener al menos 8 caracteres.", 422);
+      // Legacy roles are optional now: condición/características/responsabilidades (V2) se asignan
+      // aparte, desde "Permisos", una vez creado el usuario. Los roles legacy siguen aceptándose
+      // (payload.roles) por si algún llamador viejo los manda, pero ya no los pide la UI.
       const requestedRoles = Array.isArray(payload?.roles) ? payload.roles.map((role) => String(role)) : [];
       const validRoles = requestedRoles.filter((role) => roles.includes(role as never));
-      if (!validRoles.length) return fail("Selecciona al menos un rol.", 422);
 
       const { data: created, error } = await supabase.from("profiles").insert({
         username: String(payload?.username ?? "").trim(),
@@ -890,10 +911,12 @@ export async function POST(request: Request) {
       }).select("id").single();
       if (error || !created) return fail(error?.message ?? "No se pudo crear el usuario.");
 
-      const { error: rolesError } = await supabase.from("profile_roles").insert(
-        validRoles.map((role) => ({ profile_id: created.id, role })),
-      );
-      if (rolesError) return fail(rolesError.message);
+      if (validRoles.length) {
+        const { error: rolesError } = await supabase.from("profile_roles").insert(
+          validRoles.map((role) => ({ profile_id: created.id, role })),
+        );
+        if (rolesError) return fail(rolesError.message);
+      }
 
       return ok({ temporaryPassword: passwordMode === "generate" ? temporaryPassword : null });
     }

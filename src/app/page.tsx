@@ -1886,7 +1886,6 @@ function renderModal({
           full_name: form.get("full_name"),
           email: form.get("email") || null,
           group_id: form.get("group_id") || null,
-          roles: form.getAll("roles"),
           active: form.get("active") === "true",
           passwordMode,
           password: form.get("password"),
@@ -1897,17 +1896,7 @@ function renderModal({
         <Field label="Nombre completo"><input className={inputClass} name="full_name" defaultValue={modal.item?.full_name} required /></Field>
         <Field label="Mail"><input className={inputClass} name="email" type="email" defaultValue={modal.item?.email ?? ""} placeholder="Para verificacion por codigo y llave de acceso" /></Field>
         <Field label="Grupo"><select className={inputClass} name="group_id" defaultValue={modal.item?.group_id ?? ""}><option value="">Sin grupo</option>{data.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></Field>
-        <fieldset>
-          <legend className="text-sm font-medium text-slate-200">Roles</legend>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            {([["ADMIN", "Super admin"], ["ANCIANO", "Anciano"], ["CONDUCTOR", "Conductor"]] as const).map(([value, label]) => (
-              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-100" key={value}>
-                <input className="h-4 w-4 accent-white" defaultChecked={modal.item?.roles.includes(value) ?? value === "ANCIANO"} name="roles" type="checkbox" value={value} />
-                {label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        {!modal.item ? <p className="text-xs text-slate-400">La condición, características y responsabilidades se asignan después, desde &ldquo;Permisos&rdquo;.</p> : null}
         {modal.item ? <Field label="Activo"><select className={inputClass} name="active" defaultValue={modal.item.active ? "true" : "false"}><option value="true">Si</option><option value="false">No</option></select></Field> : null}
         {!modal.item ? <><Field label="Contraseña"><select className={inputClass} value={passwordMode} onChange={(event) => setPasswordMode(event.target.value as "manual" | "generate")}><option value="generate">Generar temporal</option><option value="manual">Escribir manual</option></select></Field><Field label="Contraseña manual"><input className={inputClass} name="password" disabled={passwordMode === "generate"} type="password" /></Field></> : null}
       </FormModal>
