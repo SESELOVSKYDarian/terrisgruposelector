@@ -1,6 +1,6 @@
 # Esquinas del mapa y territorios cercanos
 
-Generado a partir del mapa "Territorio Peralta Ramos". 170 esquinas (cruces de calles), cada una con los territorios
+Generado a partir del mapa "Territorio Peralta Ramos". 180 esquinas (cruces de calles), cada una con los territorios
 que la tocan, ordenados del que tiene mas manzanas en esa esquina al que tiene menos. Se cargan con
 `supabase/seed-esquinas-mapa.sql` como puntos de salida de tipo Esquina.
 
@@ -10,11 +10,8 @@ que la tocan, ordenados del que tiene mas manzanas en esa esquina al que tiene m
 - Territorios 18, 19 y 15: calles verticales seguidas desde la grilla de abajo; confianza **media-alta**.
 - Territorios 14, 16 y 17: el mapa no rotula las calles verticales de esa zona (estan inclinadas); se dedujeron por continuidad. Confianza **media**: revisar.
 - Manzanas tachadas con X (no se visitan) no cuentan como territorio cercano.
-
-## Pendiente (no incluido)
-
-- Territorios **20 y 21** (zona sur, calles Catamarca, La Rioja, H. Irigoyen, Mitre, San Luis): el mapa no rotula sus calles verticales.
-  Con los nombres de esas calles se agregan.
+- Zona sur (20 y 21): calles verticales JB. Justo (la del medio) y Larrea, segun indicacion. La calle entre ambos territorios figura como H. IRIGOYEN en el mapa y se cargo como Azcuenaga, como se indico.
+- Todas las esquinas se cargan con dias lunes a viernes.
 
 ### Zona este (1 a 13)
 
@@ -195,3 +192,18 @@ que la tocan, ordenados del que tiene mas manzanas en esa esquina al que tiene m
 | Dellepiane y El Cano | 26 | alta |
 | Dellepiane y Gaboto | 24, 26 | alta |
 | Dellepiane y Solis | 24 | alta |
+
+### Zona sur (20 y 21)
+
+| Esquina | Territorios cercanos (de mas a menos) | Confianza |
+|---|---|---|
+| Catamarca y JB. Justo | 20 | alta |
+| Catamarca y Larrea | 20 | alta |
+| La Rioja y JB. Justo | 20 | alta |
+| La Rioja y Larrea | 20 | alta |
+| Azcuenaga y JB. Justo | 20, 21 | alta |
+| Azcuenaga y Larrea | 20, 21 | alta |
+| Mitre y JB. Justo | 21 | alta |
+| Mitre y Larrea | 21 | alta |
+| San Luis y JB. Justo | 21 | alta |
+| San Luis y Larrea | 21 | alta |

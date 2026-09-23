@@ -1,8 +1,9 @@
--- Esquinas leidas del mapa "Territorio Peralta Ramos" (170 puntos de salida tipo ESQUINA).
+-- Esquinas leidas del mapa "Territorio Peralta Ramos" (180 puntos de salida tipo ESQUINA).
 -- Cada esquina se relaciona con los territorios que la tocan, del que mas manzanas tiene en la esquina al que menos.
 -- Aditiva e idempotente: solo crea puntos cuya direccion todavia no existe (no modifica ni borra los que ya cargaste)
 -- y solo asocia territorios a los puntos que crea. Requiere fase-23-departure-point-kind.sql.
--- Zona centro (14, 16, 17) y territorios 20 y 21: ver docs/ESQUINAS_MAPA.md (revisar antes de usar).
+-- Zona centro (14, 16, 17): ver docs/ESQUINAS_MAPA.md (revisar antes de usar).
+-- Todas las esquinas quedan disponibles de lunes a viernes (available_days = 1..5): entre semana se usan esquinas.
 
 begin;
 
@@ -310,7 +311,19 @@ insert into _esquinas (address, territory_number, sort_order) values
   ('Dellepiane y El Cano', 26, 0),
   ('Dellepiane y Gaboto', 24, 0),
   ('Dellepiane y Gaboto', 26, 1),
-  ('Dellepiane y Solis', 24, 0);
+  ('Dellepiane y Solis', 24, 0),
+  ('Catamarca y JB. Justo', 20, 0),
+  ('Catamarca y Larrea', 20, 0),
+  ('La Rioja y JB. Justo', 20, 0),
+  ('La Rioja y Larrea', 20, 0),
+  ('Azcuenaga y JB. Justo', 20, 0),
+  ('Azcuenaga y JB. Justo', 21, 1),
+  ('Azcuenaga y Larrea', 20, 0),
+  ('Azcuenaga y Larrea', 21, 1),
+  ('Mitre y JB. Justo', 21, 0),
+  ('Mitre y Larrea', 21, 0),
+  ('San Luis y JB. Justo', 21, 0),
+  ('San Luis y Larrea', 21, 0);
 
 with nuevas as (
   insert into public.departure_points (name, address, kind)
@@ -326,5 +339,13 @@ select n.id, t.id, e.sort_order
 from nuevas n
 join _esquinas e on e.address = n.address
 join public.territories t on t.number = e.territory_number;
+
+-- Lunes a viernes para estas esquinas (nuevas o ya cargadas). No pisa dias que hayas elegido a mano:
+-- solo toca las que siguen sin dias definidos.
+update public.departure_points
+set available_days = '{1,2,3,4,5}', updated_at = now()
+where kind = 'ESQUINA'
+  and available_days = '{}'::integer[]
+  and lower(btrim(address)) in (select lower(address) from _esquinas);
 
 commit;
