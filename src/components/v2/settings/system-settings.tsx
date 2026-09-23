@@ -35,6 +35,38 @@ function LockCard({ lock, canEdit }: { lock: LockDuration; canEdit: boolean }) {
   );
 }
 
+function TestEmailCard() {
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ sent: boolean; transport: string; error?: string } | null>(null);
+  async function send() {
+    setBusy(true);
+    setResult(null);
+    try {
+      const response = await fetch("/api/v2/system", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sendTestEmail", payload: { to } }) });
+      const body = await response.json().catch(() => ({}));
+      setResult(response.ok ? body : { sent: false, transport: "?", error: body.error ?? "No se pudo enviar." });
+    } catch {
+      setResult({ sent: false, transport: "?", error: "No se pudo contactar al servidor." });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Correo de prueba" description="Manda un mail real ahora mismo y te muestra el error exacto si falla (SMTP o Resend), acá sí es seguro verlo.">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-64 flex-1 text-sm text-muted">Mandar a<input className={cn(fieldClass, "mt-1 block w-full")} onChange={(event) => setTo(event.target.value)} placeholder="tu@correo.com" type="email" value={to} /></label>
+        <button className={primarySmallButtonClass} disabled={busy || !to} onClick={() => void send()} type="button">{busy ? "Enviando…" : "Enviar prueba"}</button>
+      </div>
+      {result ? (
+        <Notice tone={result.sent ? "success" : "error"}>
+          {result.sent ? `Enviado por ${result.transport}. Revisá la casilla (y spam).` : `Falló por ${result.transport}: ${result.error}`}
+        </Notice>
+      ) : null}
+    </Card>
+  );
+}
+
 const reminderRules = [
   "Salida asignada: aviso inmediato al conductor.",
   "Fin de semana: aviso 3 días antes al conductor.",
@@ -74,6 +106,7 @@ export function SystemSettings() {
           ))}
         </div>
       </Card>
+      <TestEmailCard />
     </div>
   );
 }
