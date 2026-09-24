@@ -504,11 +504,12 @@ export default function Home() {
     setSaving(true);
     setAuthError("");
     try {
-      await requestJson("/api/auth/verify-otp", { method: "POST", body: JSON.stringify({ code }) });
+      const result = await requestJson("/api/auth/verify-otp", { method: "POST", body: JSON.stringify({ code }) });
       await loadData({ throwOnError: true });
       setActiveView("windows");
       setAuthView("login");
       setToast({ type: "success", text: "Sesion iniciada." });
+      if (result.offerPasskey) setShowPasskeyPrompt(true);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Codigo incorrecto.");
     } finally {

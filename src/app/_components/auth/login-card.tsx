@@ -66,7 +66,7 @@ export function LoginCard({
         </label>
         <label className="flex items-center gap-2 text-sm text-muted">
           <input className="h-4 w-4 rounded border-border accent-primary" name="deviceSecure" type="checkbox" />
-          Este dispositivo es seguro
+          Este dispositivo es seguro (recordarlo 30 dias)
         </label>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <motion.button

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createAdminSupabaseClient, createMagicLoginToken, createOtpPendingToken, generateOtpCode, otpPendingCookieName, readOtpPendingProfileId } from "@/lib/server/auth";
+import { createAdminSupabaseClient, createMagicLoginToken, createOtpPendingToken, generateOtpCode, otpPendingCookieName, readOtpPendingProfileId, readOtpPendingTrust } from "@/lib/server/auth";
 import { otpEmailHtml, sendMail } from "@/lib/server/mail";
 import { fail } from "@/lib/server/responses";
 
@@ -15,6 +15,7 @@ export async function POST() {
   const { data: profile, error } = await supabase.from("profiles").select("email").eq("id", profileId).maybeSingle();
   if (error || !profile?.email) return fail("No se pudo reenviar el codigo.", 400);
 
+  const trust = readOtpPendingTrust(cookieStore.get(otpPendingCookieName)?.value);
   const code = generateOtpCode();
   try {
     await sendMail(profile.email, "Tu codigo de verificacion", otpEmailHtml(code, createMagicLoginToken(profileId)));
@@ -22,7 +23,7 @@ export async function POST() {
     console.error("No se pudo reenviar el código de verificación:", cause);
     return fail("No se pudo reenviar el código de verificación. Probá de nuevo en un momento.", 502);
   }
-  const pendingToken = createOtpPendingToken(profileId, code);
+  const pendingToken = createOtpPendingToken(profileId, code, trust);
   cookieStore.set(otpPendingCookieName, pendingToken, {
     httpOnly: true,
     sameSite: "lax",

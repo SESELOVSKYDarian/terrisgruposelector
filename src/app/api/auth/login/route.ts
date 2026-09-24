@@ -8,6 +8,7 @@ import {
   hashPassword,
   otpPendingCookieName,
   setSessionCookie,
+  setTrustCookie,
   trustCookieName,
   verifyPassword,
   verifyTrustToken,
@@ -105,8 +106,13 @@ export async function POST(request: Request) {
   const cookieStore = await cookies();
   const trustValid = verifyTrustToken(cookieStore.get(trustCookieName)?.value, profile.id);
 
-  if (trustValid || deviceSecure || !existingProfile.email) {
-    await setSessionCookie(profile);
+  // A trusted device skips the emailed code. Ticking "Este dispositivo es seguro" does not skip it:
+  // the code is asked once and, when verified, the device is remembered (see verify-otp).
+  if (trustValid || !existingProfile.email) {
+    // Without an email there is no code to verify: remember the device only if the person asked for it.
+    if (!trustValid && deviceSecure) await setTrustCookie(profile.id);
+    if (trustValid) await setTrustCookie(profile.id); // keeps a used device trusted
+    await setSessionCookie(profile, undefined, { remember: trustValid || Boolean(deviceSecure) });
     return NextResponse.json({ status: "ok", profile, offerPasskey: Boolean(deviceSecure) && !trustValid });
   }
 
@@ -117,7 +123,7 @@ export async function POST(request: Request) {
     console.error("No se pudo enviar el código de verificación (login):", cause);
     return fail("No se pudo enviar el código de verificación. Probá de nuevo en un momento.", 502);
   }
-  const pendingToken = createOtpPendingToken(profile.id, code);
+  const pendingToken = createOtpPendingToken(profile.id, code, Boolean(deviceSecure));
   cookieStore.set(otpPendingCookieName, pendingToken, {
     httpOnly: true,
     sameSite: "lax",

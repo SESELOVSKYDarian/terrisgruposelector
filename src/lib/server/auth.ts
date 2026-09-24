@@ -26,6 +26,8 @@ type SessionPayload = {
 
 const sessionCookieName = "terris_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
+/** Sessions on a device the person marked as safe (and verified by email) last a month. */
+const rememberedSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 
 export function createAdminSupabaseClient() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -98,13 +100,16 @@ function decodeSession(token?: string): SessionPayload | null {
   return payload;
 }
 
-export async function setSessionCookie(profile: SessionProfile, actorId?: string) {
+export async function setSessionCookie(profile: SessionProfile, actorId?: string, options: { remember?: boolean } = {}) {
   const cookieStore = await cookies();
+  // A trusted device keeps its session for a month; impersonation sessions are always short.
+  const remember = !actorId && (options.remember ?? verifyTrustToken(cookieStore.get(trustCookieName)?.value, profile.id));
+  const maxAge = remember ? rememberedSessionMaxAgeSeconds : sessionMaxAgeSeconds;
   const token = encodeSession({
     profileId: profile.id,
     username: profile.username,
     roles: profile.roles,
-    exp: Date.now() + sessionMaxAgeSeconds * 1000,
+    exp: Date.now() + maxAge * 1000,
     ...(actorId ? { actorId } : {}),
   });
 
@@ -112,7 +117,7 @@ export async function setSessionCookie(profile: SessionProfile, actorId?: string
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    maxAge: sessionMaxAgeSeconds,
+    maxAge,
     path: "/",
   });
 }
@@ -200,7 +205,7 @@ export const webauthnChallengeCookieName = "terris_webauthn_challenge";
 export const hasPasskeyCookieName = "terris_has_passkey";
 
 const otpTtlMs = 10 * 60 * 1000;
-const trustTtlMs = 7 * 24 * 60 * 60 * 1000;
+const trustTtlMs = 30 * 24 * 60 * 60 * 1000;
 const webauthnChallengeTtlMs = 5 * 60 * 1000;
 
 export function generateOtpCode() {
@@ -211,20 +216,24 @@ function hashOtpCode(code: string) {
   return createHmac("sha256", getSessionSecret()).update(code).digest("base64url");
 }
 
-type OtpPendingPayload = { profileId: string; codeHash: string; attempts: number };
+type OtpPendingPayload = { profileId: string; codeHash: string; attempts: number; /** "Este dispositivo es seguro" was ticked: remember the device once the code is verified. */ trust?: boolean };
 
-export function createOtpPendingToken(profileId: string, code: string) {
-  return signGenericPayload<OtpPendingPayload>({ profileId, codeHash: hashOtpCode(code), attempts: 0 }, otpTtlMs);
+export function createOtpPendingToken(profileId: string, code: string, trust = false) {
+  return signGenericPayload<OtpPendingPayload>({ profileId, codeHash: hashOtpCode(code), attempts: 0, trust }, otpTtlMs);
 }
 
 export function reissueOtpPendingToken(token: string) {
   const payload = verifyGenericPayload<OtpPendingPayload>(token);
   if (!payload) return null;
-  return signGenericPayload<OtpPendingPayload>({ profileId: payload.profileId, codeHash: payload.codeHash, attempts: payload.attempts + 1 }, otpTtlMs);
+  return signGenericPayload<OtpPendingPayload>({ profileId: payload.profileId, codeHash: payload.codeHash, attempts: payload.attempts + 1, trust: payload.trust }, otpTtlMs);
 }
 
 export function readOtpPendingProfileId(token?: string) {
   return verifyGenericPayload<OtpPendingPayload>(token)?.profileId ?? null;
+}
+
+export function readOtpPendingTrust(token?: string) {
+  return Boolean(verifyGenericPayload<OtpPendingPayload>(token)?.trust);
 }
 
 export function verifyOtpCode(token: string | undefined, code: string) {
@@ -236,7 +245,18 @@ export function verifyOtpCode(token: string | undefined, code: string) {
   const matches = candidateHash.length === payload.codeHash.length && timingSafeEqual(Buffer.from(candidateHash), Buffer.from(payload.codeHash));
 
   if (!matches) return { ok: false as const, reason: "mismatch" as const };
-  return { ok: true as const, profileId: payload.profileId };
+  return { ok: true as const, profileId: payload.profileId, trust: Boolean(payload.trust) };
+}
+
+/** Remembers this browser as safe for the person: the emailed code is not asked again for a month. */
+export async function setTrustCookie(profileId: string) {
+  (await cookies()).set(trustCookieName, createTrustToken(profileId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: trustTtlMs / 1000,
+    path: "/",
+  });
 }
 
 type TrustPayload = { profileId: string };

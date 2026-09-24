@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createAdminSupabaseClient, otpPendingCookieName, setSessionCookie, verifyMagicLoginToken, type SessionProfile } from "@/lib/server/auth";
+import { createAdminSupabaseClient, otpPendingCookieName, readOtpPendingTrust, setSessionCookie, setTrustCookie, verifyMagicLoginToken, type SessionProfile } from "@/lib/server/auth";
 import { fail } from "@/lib/server/responses";
 import type { Role } from "@/lib/domain";
 
@@ -33,7 +33,11 @@ export async function POST(request: Request) {
     must_change_password: existingProfile.must_change_password,
   };
 
-  await setSessionCookie(profile);
-  (await cookies()).delete(otpPendingCookieName);
+  // Same browser that asked for the code with "Este dispositivo es seguro" ticked: remember it.
+  const cookieStore = await cookies();
+  const trust = readOtpPendingTrust(cookieStore.get(otpPendingCookieName)?.value);
+  if (trust) await setTrustCookie(profile.id);
+  await setSessionCookie(profile, undefined, { remember: trust });
+  cookieStore.delete(otpPendingCookieName);
   return NextResponse.json({ status: "ok", profile });
 }

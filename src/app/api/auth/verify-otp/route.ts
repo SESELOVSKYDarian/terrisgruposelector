@@ -6,6 +6,7 @@ import {
   readOtpPendingProfileId,
   reissueOtpPendingToken,
   setSessionCookie,
+  setTrustCookie,
   verifyOtpCode,
   type SessionProfile,
 } from "@/lib/server/auth";
@@ -65,9 +66,11 @@ export async function POST(request: Request) {
     must_change_password: existingProfile.must_change_password,
   };
 
-  await setSessionCookie(profile);
+  // "Este dispositivo es seguro" was ticked at login and the emailed code is now verified: remember it.
+  if (result.trust) await setTrustCookie(profile.id);
+  await setSessionCookie(profile, undefined, { remember: result.trust });
   cookieStore.delete(otpPendingCookieName);
-  return NextResponse.json({ status: "ok", profile });
+  return NextResponse.json({ status: "ok", profile, offerPasskey: result.trust });
 }
 
 export async function GET() {
