@@ -3253,7 +3253,9 @@ function TerritoryBlocksModal({
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [newLabels, setNewLabels] = useState<string[]>([]);
   const [completionDate, setCompletionDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [completionConductorId, setCompletionConductorId] = useState("");
   const [isCompletionDateOpen, setCompletionDateOpen] = useState(false);
+  const conductors = data.profiles.filter((item) => hasCapability(item, "CONDUCTOR"));
 
   const blocks = useMemo(
     () => data.blocks
@@ -3309,7 +3311,7 @@ function TerritoryBlocksModal({
   const completedTotal = completedExistingIds.length + completedNewLabels.length;
   const allCompleted = total > 0 && completedTotal === total;
 
-  function saveProgress(completedOn?: string) {
+  function saveProgress(completedOn?: string, conductorId?: string) {
     void mutate("setTerritoryBlockProgress", {
       annual_round_id: roundId,
       territory_id: territory.id,
@@ -3317,6 +3319,7 @@ function TerritoryBlocksModal({
       new_block_labels: newLabels,
       completed_new_block_labels: completedNewLabels,
       completed_on: completedOn,
+      conductor_id: conductorId,
     });
   }
 
@@ -3388,11 +3391,17 @@ function TerritoryBlocksModal({
           <section className="w-full max-w-sm rounded-2xl border border-primary/25 bg-[#141516] p-5 shadow-2xl">
             <CalendarDays className="text-primary-hover" size={22} aria-hidden="true" />
             <h3 className="mt-4 text-lg font-semibold text-white" id="completion-date-title">Registrar territorio completado</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-300">Todas las manzanas están completas. Indica la fecha de finalización.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">Todas las manzanas están completas. Indica la fecha y quién condujo la salida: así queda en el S-13.</p>
             <label className="mt-4 block text-sm font-medium text-slate-200">Fecha de finalización<input className={inputClass} type="date" value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} required /></label>
+            <Field label="Conductor">
+              <select className={inputClass} value={completionConductorId} onChange={(event) => setCompletionConductorId(event.target.value)} required>
+                <option value="">Seleccionar conductor</option>
+                {conductors.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
+              </select>
+            </Field>
             <div className="mt-5 grid grid-cols-2 gap-2">
               <button className={secondaryButtonClass} type="button" onClick={() => setCompletionDateOpen(false)}>Volver</button>
-              <button className={primarySmallButtonClass} type="button" disabled={saving || !completionDate} onClick={() => saveProgress(completionDate)}>Guardar fecha</button>
+              <button className={primarySmallButtonClass} type="button" disabled={saving || !completionDate || !completionConductorId} onClick={() => saveProgress(completionDate, completionConductorId)}>Guardar</button>
             </div>
           </section>
         </div>

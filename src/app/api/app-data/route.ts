@@ -9,10 +9,10 @@ import {
 } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
 import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
-import { getPlanningAuthority } from "@/server/outings/planning";
+import { getPlanningAuthority, isEligibleConductor } from "@/server/outings/planning";
 import { lastOccurrences, normalizePointKind } from "@/modules/outings/suggestions";
 import { loadReportedOutings } from "@/server/outings/history";
-import { recomputeRound } from "@/server/territories/rounds";
+import { openOrCreateRound, recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
 import { blockStatuses, reservationStatuses, roles, type Role } from "@/lib/domain";
@@ -761,6 +761,7 @@ export async function POST(request: Request) {
           : [],
       );
       const completedOn = typeof payload?.completed_on === "string" ? payload.completed_on : null;
+      const conductorId = payload?.conductor_id ? String(payload.conductor_id) : null;
 
       if (!annualRoundId || !territoryId) return fail("Falta seleccionar territorio y vuelta.", 422);
 
@@ -786,6 +787,9 @@ export async function POST(request: Request) {
       if (allCompleted && (!completedOn || !/^\d{4}-\d{2}-\d{2}$/.test(completedOn))) {
         return fail("Indica una fecha válida de finalización.", 422);
       }
+      if (allCompleted && (!conductorId || !(await isEligibleConductor(supabase, conductorId)))) {
+        return fail("Selecciona el conductor que completó el territorio.", 422);
+      }
 
       const rows = (territoryBlocks ?? []).map((block) => ({
         annual_round_id: annualRoundId,
@@ -801,6 +805,24 @@ export async function POST(request: Request) {
           .from("block_round_statuses")
           .upsert(rows, { onConflict: "annual_round_id,block_id" });
         if (error) return fail(error.message);
+      }
+
+      // Vueltas anuales (arriba) and el S-13 (territory_rounds/territory_visits) son sistemas
+      // separados: completar un territorio acá también deja su historial en el S-13, con
+      // conductor, para que la sincronización con Google Docs no dependa de cargarlo dos veces.
+      if (allCompleted && completedOn && conductorId) {
+        const territoryRoundId = await openOrCreateRound(supabase, territoryId, conductorId, completedOn);
+        const allLabels = (territoryBlocks ?? []).map((block) => block.label as string);
+        const { error: visitError } = await supabase.from("territory_visits").insert({
+          territory_round_id: territoryRoundId,
+          conductor_id: conductorId,
+          visit_date: completedOn,
+          done_labels: allLabels,
+          pending_labels: [],
+        });
+        if (visitError) return fail(visitError.message);
+        const recomputeError = await recomputeRound(supabase, territoryRoundId, { derive: true });
+        if (recomputeError) return fail(recomputeError);
       }
 
       return ok();
