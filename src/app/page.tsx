@@ -768,7 +768,7 @@ export default function Home() {
           </div>
         ) : activeView === "territories" && shellAccess.canManageTerritories ? (
           <div className="view-transition min-w-0" key="territories">
-            <TerritoriesHub legacy={isAdmin ? <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} /> : null} />
+            <TerritoriesHub legacy={isAdmin ? <TerritoriesPanel data={data} openRound={openRound} mutate={mutate} setModal={setModal} /> : null} rounds={isAdmin ? <RoundsPanel data={data} mutate={mutate} setModal={setModal} /> : null} />
           </div>
         ) : activeView === "personalTerritory" && shellAccess.hasPersonalTerritory ? (
           <div className="view-transition min-w-0" key="personalTerritory">
@@ -923,9 +923,9 @@ export default function Home() {
 }
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
-function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "personal" as const, label: "Personales" }, { id: "dnv" as const, label: "No visitar" }];
-  const [tab, setTab] = useState<"list" | "map" | "s13" | "buildings" | "phone" | "personal" | "dnv">(() => {
+function TerritoriesHub({ legacy, rounds }: { legacy: ReactNode; rounds: ReactNode }) {
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), ...(rounds ? [{ id: "rounds" as const, label: "Vueltas" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "personal" as const, label: "Personales" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "rounds" | "map" | "s13" | "buildings" | "phone" | "personal" | "dnv">(() => {
     const requested = peekTab("territories");
     return tabs.find((entry) => entry.id === requested)?.id ?? tabs[0].id;
   });
@@ -933,7 +933,7 @@ function TerritoriesHub({ legacy }: { legacy: ReactNode }) {
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : tab === "personal" ? <PersonalAssignmentsManager /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "rounds" && rounds ? rounds : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : tab === "personal" ? <PersonalAssignmentsManager /> : <S13View />}
     </div>
   );
 }
