@@ -52,6 +52,13 @@ async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
 /** Same authenticated call, for callers outside this module that need endpoints S-13 doesn't (Drive listing, etc.). */
 export const callGoogleApi = call;
 
+/** Raw bytes of a Drive file (alt=media) — no copy is made, so it works even when the service account has no Drive quota. */
+export async function downloadDriveFile(fileId: string): Promise<Buffer> {
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${await accessToken()}` } });
+  if (!response.ok) throw new GoogleApiError(`Google: descarga fallida (${response.status})`, response.status);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 export type GoogleDocument = { revisionId: string; body: DocsBodyContent };
 
 export async function getDocument(documentId: string): Promise<GoogleDocument> {

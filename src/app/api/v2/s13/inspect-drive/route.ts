@@ -1,5 +1,6 @@
 import { fail, ok } from "@/lib/server/responses";
 import { listDriveFolder, readDriveFileAsText } from "@/server/integrations/drive-scan";
+import { downloadDriveFile } from "@/server/integrations/google-docs";
 
 export const runtime = "nodejs";
 
@@ -14,10 +15,13 @@ export async function GET(request: Request) {
   const secret = process.env.S13_INSPECT_TOKEN;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return fail("No autorizado.", 401);
 
-  const folder = new URL(request.url).searchParams.get("folder");
+  const params = new URL(request.url).searchParams;
+  const folder = params.get("folder");
   if (!folder) return fail("Falta el parámetro folder.", 422);
+  const rawFileId = params.get("file");
 
   try {
+    if (rawFileId) return ok({ id: rawFileId, base64: (await downloadDriveFile(rawFileId)).toString("base64") });
     const files = await listDriveFolder(folder);
     const results = [];
     for (const file of files) {
