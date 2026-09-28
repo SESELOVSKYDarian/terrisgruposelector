@@ -49,11 +49,23 @@ async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   return body;
 }
 
+/** Same authenticated call, for callers outside this module that need endpoints S-13 doesn't (Drive listing, etc.). */
+export const callGoogleApi = call;
+
 export type GoogleDocument = { revisionId: string; body: DocsBodyContent };
 
 export async function getDocument(documentId: string): Promise<GoogleDocument> {
   const data = await call<{ revisionId?: string; body?: { content?: DocsBodyContent } }>(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`);
   return { revisionId: data.revisionId ?? "", body: data.body?.content ?? [] };
+}
+
+/**
+ * The same document, as its full body content (paragraphs included, not just tables) — for reading
+ * a Doc that is not necessarily laid out as an S-13 table (instructions, an older hand-kept copy, ...).
+ */
+export async function getRawDocument(documentId: string) {
+  const data = await call<{ body?: { content?: import("@/modules/s13/doc-text").BodyElement[] } }>(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`);
+  return data.body?.content ?? [];
 }
 
 /** One atomic batch. `requiredRevisionId` makes Google reject it if someone edited the Doc in between. */

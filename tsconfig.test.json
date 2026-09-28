@@ -16,6 +16,7 @@
     "src/modules/outings/recurring.ts",
     "src/modules/outings/suggestions.ts",
     "src/modules/outings/reported.ts",
+    "src/modules/s13/doc-text.ts",
     "src/modules/groups/group-outings.ts",
     "src/modules/territories/rounds.ts",
     "src/modules/territories/names.ts",
