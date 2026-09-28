@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, type MouseEvent } from "react";
-import { Pencil, Undo2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Pencil, Trash2, Undo2 } from "lucide-react";
 import { Select } from "@/app/_components/select";
 import { miniButtonClass, primarySmallButtonClass, secondaryButtonClass } from "@/app/_components/ui-classes";
 import { polygonCentroid, toNormalizedPoint, toSvgPoints, type Point, type TerritoryMapState } from "@/modules/map/geometry";
@@ -45,6 +45,21 @@ export function MapView() {
   const [editBlock, setEditBlock] = useState("");
   const [draft, setDraft] = useState<Point[]>([]);
 
+  // Ctrl+Z (or Backspace) removes the last point while drawing a shape.
+  useEffect(() => {
+    if (!editing || !draft.length) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" || event.key === "Backspace") {
+        event.preventDefault();
+        setDraft((current) => current.slice(0, -1));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editing, draft.length]);
+
   const statsById = useMemo(() => new Map((data?.stats ?? []).map((stat) => [stat.territory_id, stat])), [data]);
   if (loading) return <Notice>Cargando mapa…</Notice>;
   if (!data) return <Notice tone="error">{error || "No se pudo cargar el mapa."}</Notice>;
@@ -57,6 +72,7 @@ export function MapView() {
   const detail = selected ? statsById.get(selected) : null;
   const aspect = layer.image_width && layer.image_height ? `${layer.image_width} / ${layer.image_height}` : "4 / 3";
   const blocksOfTerritory = data.blocks.filter((block) => block.territory_id === editTerritory);
+  const savedShape = data.features.find((feature) => feature.territory_id === editTerritory && (feature.block_id ?? "") === editBlock);
 
   function onImageClick(event: MouseEvent<HTMLDivElement>) {
     if (!editing || !editTerritory || !imageRef.current) return;
@@ -80,13 +96,16 @@ export function MapView() {
       </div>
 
       {editing ? (
-        <Card title="Dibujar forma" description="Elegí el territorio (y opcionalmente una manzana) y hacé clic sobre el mapa para marcar cada vértice. Con 3 puntos o más podés guardar.">
+        <Card title="Dibujar forma" description="Elegí el territorio (y opcionalmente una manzana) y hacé clic sobre el mapa para marcar cada vértice. Con 3 puntos o más podés guardar. Ctrl+Z deshace el último punto; guardar sobre un territorio ya dibujado reemplaza su forma.">
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-56"><Select onChange={(value) => { setEditTerritory(value); setEditBlock(""); setDraft([]); }} options={data.stats.map((stat) => ({ value: stat.territory_id, label: `Territorio ${stat.number}` }))} placeholder="Territorio" size="compact" value={editTerritory} /></div>
             <div className="w-44"><Select onChange={setEditBlock} options={[{ value: "", label: "Territorio completo" }, ...blocksOfTerritory.map((block) => ({ value: block.id, label: `Manzana ${block.label}` }))]} size="compact" value={editBlock} /></div>
             <button className={miniButtonClass} disabled={!draft.length} onClick={() => setDraft((current) => current.slice(0, -1))} type="button"><Undo2 size={14} aria-hidden="true" />Deshacer punto</button>
             <button className={primarySmallButtonClass} disabled={busy || draft.length < 3 || !editTerritory} onClick={() => void saveShape()} type="button">Guardar forma ({draft.length} puntos)</button>
             <button className={secondaryButtonClass} disabled={!draft.length} onClick={() => setDraft([])} type="button">Descartar</button>
+            {savedShape ? (
+              <button className={secondaryButtonClass} disabled={busy} onClick={() => void run("deleteFeature", { id: savedShape.id })} title="Borra la forma que ya estaba guardada para esta selección" type="button"><Trash2 size={14} aria-hidden="true" />Borrar forma guardada</button>
+            ) : null}
           </div>
         </Card>
       ) : null}
