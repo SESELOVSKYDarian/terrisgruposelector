@@ -9,13 +9,14 @@ import { formatS13Date } from "@/modules/s13/layout";
 import { cn } from "@/lib/utils";
 import { Card, Empty, Notice, Pill } from "../ui";
 import { useModuleApi } from "../use-module-api";
+import { HistoryImportCard, ZoomDaysCard } from "./telephone-tools";
 
 type NumberRow = { id: string; territory_id: string; number: string; active: boolean; activity: PhoneActivity | null; last_activity_on: string | null; conductor: string | null };
-type State = { territories: { id: string; number: number; name: string | null }[]; numbers: NumberRow[] };
+type State = { zoom_days: { days: number[]; hora: string | null }; territories: { id: string; number: number; name: string | null }[]; numbers: NumberRow[] };
 
 /** Territorios → Telefónico: the phone numbers of each territory (same territories, not a separate map). */
 export function TelephonePanel() {
-  const { data, error, loading, busy, run } = useModuleApi<State>("/api/v2/telephone");
+  const { data, error, loading, busy, run, reload } = useModuleApi<State>("/api/v2/telephone");
   const [filter, setFilter] = useState("");
   const [territory, setTerritory] = useState("");
   const [text, setText] = useState("");
@@ -37,6 +38,8 @@ export function TelephonePanel() {
   return (
     <div className="space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <ZoomDaysCard initial={data.zoom_days} onChanged={() => void reload()} />
+      <HistoryImportCard onChanged={() => void reload()} />
       <Card title="Agregar números" description="Pegá uno por línea. Se ignoran los repetidos (aunque cambie el formato) y los que no parezcan un teléfono.">
         <div className="space-y-2">
           <div className="w-56"><Select onChange={setTerritory} options={data.territories.map((entry) => ({ value: entry.id, label: `Territorio ${entry.number}` }))} placeholder="Territorio" size="compact" value={territory} /></div>
