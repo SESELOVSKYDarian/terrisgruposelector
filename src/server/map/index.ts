@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchAll } from "@/server/paging";
 
 import { formatConductorName } from "@/modules/territories/names";
 import type { TerritoryMapState } from "@/modules/map/geometry";
@@ -29,12 +30,12 @@ export async function loadTerritoryStats(supabase: AdminSupabase, roundId: strin
   const [territories, blocks, rounds, visits, dnv, buildingRows, roundStatuses, doneStatuses] = await Promise.all([
     supabase.from("territories").select("id, number, name").eq("active", true).order("number"),
     supabase.from("blocks").select("id, territory_id, label").eq("active", true),
-    supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, pending_block_labels, profiles!conductor_id(full_name)"),
-    supabase.from("territory_visits").select("visit_date, territory_rounds!inner(territory_id)"),
+    fetchAll((from, to) => supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, pending_block_labels, profiles!conductor_id(full_name)").order("id").range(from, to)),
+    fetchAll((from, to) => supabase.from("territory_visits").select("visit_date, territory_rounds!inner(territory_id)").order("id").range(from, to)),
     doNotVisitCounts(supabase).catch(() => new Map<string, number>()),
     supabase.from("buildings").select("territory_id").eq("status", "ACTIVE"),
     roundId ? supabase.from("block_round_statuses").select("block_id, status").eq("annual_round_id", roundId) : Promise.resolve({ data: [], error: null }),
-    supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null),
+    fetchAll((from, to) => supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null).order("id").range(from, to)),
   ]);
   for (const result of [territories, blocks, rounds, visits, roundStatuses, doneStatuses]) if (result.error) throw new Error(result.error.message);
 

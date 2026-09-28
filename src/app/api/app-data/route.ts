@@ -12,6 +12,7 @@ import { handleOutingAction, OUTING_ACTIONS } from "@/server/outings/actions";
 import { getPlanningAuthority, isEligibleConductor } from "@/server/outings/planning";
 import { lastOccurrences, normalizePointKind } from "@/modules/outings/suggestions";
 import { loadReportedOutings } from "@/server/outings/history";
+import { fetchAll } from "@/server/paging";
 import { openOrCreateRound, recomputeRound } from "@/server/territories/rounds";
 import { activeDoNotVisit } from "@/server/territories/do-not-visit";
 import { getFreshPermissionContext, hasPermission } from "@/server/permissions";
@@ -258,7 +259,7 @@ export async function GET() {
             .eq("status", "ACTIVE"),
       supabase.from("blocks").select("*").eq("active", true).order("label"),
       supabase.from("annual_rounds").select("*").order("year", { ascending: false }).order("opened_at", { ascending: false }),
-      supabase.from("block_round_statuses").select("*, blocks(label,territory_id,territories(number,name))").order("updated_at", { ascending: false }),
+      fetchAll((from, to) => supabase.from("block_round_statuses").select("*, blocks(label,territory_id,territories(number,name))").order("updated_at", { ascending: false }).order("id").range(from, to)),
       isAdmin
         ? supabase.from("profiles").select("id, username, full_name, email, active, must_change_password, approval_status, password_updated_at, group_id, groups(name), profile_roles(role)").order("full_name")
         : isPlanner
@@ -271,10 +272,14 @@ export async function GET() {
             .order("created_at", { ascending: false })
             .limit(30)
         : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("territory_rounds")
-        .select("*, territories(number,name), profiles!conductor_id(full_name,username)")
-        .order("assigned_on", { ascending: false }),
+      fetchAll((from, to) =>
+        supabase
+          .from("territory_rounds")
+          .select("*, territories(number,name), profiles!conductor_id(full_name,username)")
+          .order("assigned_on", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
       isPlanner
         ? supabase
             .from("weekly_outings")
@@ -288,10 +293,14 @@ export async function GET() {
         ? supabase.from("weekend_roster").select("*, profiles!conductor_id(full_name,username)").order("service_date")
         : Promise.resolve({ data: [], error: null }),
       isAdmin
-        ? supabase
-            .from("territory_visits")
-            .select("*, profiles!conductor_id(full_name,username), territory_rounds(territory_id, territories(number))")
-            .order("visit_date", { ascending: false })
+        ? fetchAll((from, to) =>
+            supabase
+              .from("territory_visits")
+              .select("*, profiles!conductor_id(full_name,username), territory_rounds(territory_id, territories(number))")
+              .order("visit_date", { ascending: false })
+              .order("id")
+              .range(from, to),
+          )
         : Promise.resolve({ data: [], error: null }),
       isAdmin || isPlanner ? loadReportedOutings(supabase).catch(() => []) : Promise.resolve([]),
     ]);
@@ -356,6 +365,14 @@ export async function GET() {
       const current = lastCompletionByTerritory.get(territoryId);
       if (!current || status.completed_on > current) lastCompletionByTerritory.set(territoryId, status.completed_on);
     }
+    // The S-13 (territory_rounds) is the source of truth for "ultima completada"; vuelta statuses only fill territories with no S-13 history.
+    const s13Last = new Map<string, string>();
+    for (const round of territoryRoundsResult.data ?? []) {
+      const completedOn = round.completed_on as string | null;
+      if (!completedOn) continue;
+      const current = s13Last.get(round.territory_id as string);
+      if (!current || completedOn > current) s13Last.set(round.territory_id as string, completedOn);
+    }
     const territoryProgress = (territoriesResult.data ?? []).map((territory) => {
       const territoryBlocks = blocks.filter((block) => block.territory_id === territory.id);
       const completedBlocks = territoryBlocks.filter((block) => activeStatuses.get(block.id) === "COMPLETED");
@@ -366,7 +383,7 @@ export async function GET() {
         pending_labels: territoryBlocks
           .filter((block) => activeStatuses.get(block.id) !== "COMPLETED")
           .map((block) => block.label),
-        last_completed_at: lastCompletionByTerritory.get(territory.id) ?? null,
+        last_completed_at: s13Last.get(territory.id) ?? lastCompletionByTerritory.get(territory.id) ?? null,
       };
     });
 

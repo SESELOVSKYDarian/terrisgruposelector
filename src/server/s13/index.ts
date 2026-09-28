@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchAll } from "@/server/paging";
 
 import { formatConductorName } from "@/modules/territories/names";
 import { buildS13Pages } from "@/modules/s13/layout";
@@ -21,7 +22,7 @@ export async function loadS13Document(supabase: AdminSupabase, document: S13Docu
 
   const [{ data: rounds, error: roundsError }, { data: statuses, error: statusesError }] = await Promise.all([
     supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids),
-    supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null),
+    fetchAll((from, to) => supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null).order("id").range(from, to)),
   ]);
   if (roundsError) throw new Error(roundsError.message);
   if (statusesError) throw new Error(statusesError.message);

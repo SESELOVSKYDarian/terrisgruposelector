@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchAll } from "@/server/paging";
 
 import {
   assembleTerritories,
@@ -41,7 +42,7 @@ export async function autoFillWeek(
   const [territoriesResult, roundsResult, completedResult, slotsResult, pointsResult, annualResult, blocksResult] = await Promise.all([
     supabase.from("territories").select("id").eq("active", true),
     supabase.from("territory_rounds").select("id,territory_id,assigned_on,completed_on,pending_block_labels"),
-    supabase.from("block_round_statuses").select("completed_on,block_id,annual_round_id,blocks(territory_id)").eq("status", "COMPLETED"),
+    fetchAll((from, to) => supabase.from("block_round_statuses").select("completed_on,block_id,annual_round_id,blocks(territory_id)").eq("status", "COMPLETED").order("id").range(from, to)),
     supabase.from("weekly_outing_slots").select("*").eq("weekly_outing_id", weeklyOutingId),
     supabase.from("departure_points").select("*, departure_point_territories(territory_id,sort_order)"),
     supabase.from("annual_rounds").select("id").eq("status", "OPEN").order("year", { ascending: false }).order("opened_at", { ascending: false }).limit(1),
