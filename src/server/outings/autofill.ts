@@ -16,6 +16,8 @@ import {
   type Suggestion,
   type SuggestionPoint,
 } from "@/modules/outings/suggestions";
+import { orderByAge } from "@/modules/telephone/assignment";
+import { assignPhoneNumbers, phoneTerritories } from "@/server/telephone";
 import { loadReportedOutings } from "./history";
 import type { AdminSupabase } from "./planning";
 
@@ -160,8 +162,37 @@ export async function autoFillWeek(
   let skipped = 0;
   const changes: AutoFillChange[] = [];
 
+  // Weekdays predefined as Zoom: those outings get the phone list of the most behind territories.
+  const zoomDays = new Map<number, string | null>();
+  if (!regenerating) {
+    const { data: zoomRows } = await supabase.from("zoom_outing_days").select("iso_weekday,hora");
+    for (const row of zoomRows ?? []) zoomDays.set(row.iso_weekday as number, (row.hora as string | null) ?? null);
+  }
+  const zoomTerritories = zoomDays.size || targets.some((slot) => slot.is_zoom) ? (await phoneTerritories(supabase)).filter((territory) => territory.phone_count > 0) : [];
+  const zoomUsed = new Set<string>();
+
   for (const slot of targets) {
     const isoWeekday = isoWeekdayOf(slot.slot_date);
+    if (!regenerating && !slot.group_id && (slot.is_zoom || (!slot.lugar && zoomDays.has(isoWeekday)))) {
+      const available = orderByAge(zoomTerritories.filter((territory) => !zoomUsed.has(territory.id)));
+      if (available.length) {
+        const primary = available[0];
+        const { error: zoomInsertError } = await supabase.from("weekly_outing_slot_territories").insert({ slot_id: slot.id, territory_id: primary.id, territory_round_id: null, sort_order: 0 });
+        if (zoomInsertError) return { error: zoomInsertError.message };
+        const hora = slot.hora || zoomDays.get(isoWeekday) || null;
+        const { error: zoomUpdateError } = await supabase.from("weekly_outing_slots").update({ is_zoom: true, lugar: "Zoom", ...(hora ? { hora } : {}), updated_at: new Date().toISOString() }).eq("id", slot.id);
+        if (zoomUpdateError) return { error: zoomUpdateError.message };
+        const assignment = await assignPhoneNumbers(supabase, { slotId: slot.id, primaryTerritoryId: primary.id, actorId: null, excludeTerritoryIds: zoomUsed });
+        for (const id of assignment.territory_ids) zoomUsed.add(id);
+        filled += 1;
+        changes.push({ slotId: slot.id, slotDate: slot.slot_date, lugarChanged: slot.lugar !== "Zoom", territoriesChanged: true });
+        continue;
+      }
+      if (slot.is_zoom) {
+        skipped += 1;
+        continue;
+      }
+    }
     const previousTerritories = territoriesBySlot.get(slot.id) ?? [];
     const previousPoint = matchPointByLugar(points, slot.lugar);
     const sameDay = dayPoints.get(slot.slot_date) ?? new Set<string>();

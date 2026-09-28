@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { formatConductorName } from "@/modules/territories/names";
 import { parsePhoneList } from "@/modules/telephone/assignment";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
+import { importPhoneHistory } from "@/server/telephone/history-import";
 import { writeAudit } from "@/server/outings/planning";
 import { getTerritoryAccess } from "@/server/territories/access";
 
@@ -10,6 +11,8 @@ export const runtime = "nodejs";
 
 const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("addNumbers"), payload: z.object({ territory_id: z.string().uuid(), text: z.string().max(20000) }) }),
+  z.object({ action: z.literal("importHistory"), payload: z.object({ text: z.string().max(300000) }) }),
+  z.object({ action: z.literal("setZoomDays"), payload: z.object({ days: z.array(z.number().int().min(1).max(7)).max(7), hora: z.string().max(20).nullable() }) }),
   z.object({ action: z.literal("setActive"), payload: z.object({ id: z.string().uuid(), active: z.boolean() }) }),
   z.object({ action: z.literal("delete"), payload: z.object({ id: z.string().uuid() }) }),
 ]);
@@ -24,12 +27,14 @@ export async function GET() {
   return handle(async () => {
     await requireManager();
     const supabase = createAdminSupabaseClient();
-    const [territories, numbers] = await Promise.all([
+    const [territories, numbers, zoomDays] = await Promise.all([
       supabase.from("territories").select("id, number, name").eq("active", true).order("number"),
       supabase.from("territory_phone_numbers").select("id, territory_id, number, active, activity, last_activity_on, profiles!last_conductor_id(full_name)").order("number"),
+      supabase.from("zoom_outing_days").select("iso_weekday, hora").order("iso_weekday"),
     ]);
-    for (const result of [territories, numbers]) if (result.error) throw new Error(result.error.message);
+    for (const result of [territories, numbers, zoomDays]) if (result.error) throw new Error(result.error.message);
     return {
+      zoom_days: { days: (zoomDays.data ?? []).map((row) => row.iso_weekday as number), hora: ((zoomDays.data ?? [])[0]?.hora as string | null) ?? null },
       territories: territories.data ?? [],
       numbers: (numbers.data ?? []).map((row) => {
         const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
@@ -45,6 +50,23 @@ export async function POST(request: Request) {
     const { action, payload } = await parseBody(request, mutation);
     const supabase = createAdminSupabaseClient();
 
+    if (action === "importHistory") {
+      const result = await importPhoneHistory(supabase, payload.text);
+      await writeAudit(supabase, { actorId: profile.id, action: "PHONE_HISTORY_IMPORTED", entityType: "territory_phone_number", entityId: null, metadata: { created: result.created, updated: result.updated, invalid: result.invalid } });
+      return result;
+    }
+    if (action === "setZoomDays") {
+      const days = [...new Set(payload.days)];
+      const hora = payload.hora?.trim() || null;
+      const cleared = await supabase.from("zoom_outing_days").delete().gte("iso_weekday", 1);
+      if (cleared.error) throw new Error(cleared.error.message);
+      if (days.length) {
+        const { error } = await supabase.from("zoom_outing_days").insert(days.map((day) => ({ iso_weekday: day, hora })));
+        if (error) throw new Error(error.message);
+      }
+      await writeAudit(supabase, { actorId: profile.id, action: "ZOOM_DAYS_CONFIGURED", entityType: "zoom_outing_days", entityId: null, metadata: { days, hora } });
+      return { days, hora };
+    }
     if (action === "addNumbers") {
       const { data: territory } = await supabase.from("territories").select("id").eq("id", payload.territory_id).eq("active", true).maybeSingle();
       if (!territory) throw new ApiError("Territorio no encontrado.", 404);

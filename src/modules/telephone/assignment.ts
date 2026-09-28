@@ -84,3 +84,54 @@ export function selectTerritoriesForPhoneOuting(primaryId: string, territories: 
 export function pendingResults(assigned: { phone_number_id: string }[], recorded: ReadonlySet<string>) {
   return assigned.filter((entry) => !recorded.has(entry.phone_number_id));
 }
+
+const activityByLabel = new Map<string, PhoneActivity>([
+  ["se llamo", "SE_LLAMO"],
+  ["no se llamo", "NO_SE_LLAMO"],
+  ["negocio", "NEGOCIO"],
+  ["no abonado / fuera de servicio", "NO_ABONADO"],
+  ["no abonado", "NO_ABONADO"],
+  ["fuera de servicio", "NO_ABONADO"],
+]);
+
+const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+
+export type PhoneHistoryRow = { territory_number: number; number: string; number_key: string; caller: string | null; last_activity_on: string | null; activity: PhoneActivity | null };
+
+/**
+ * Pasted spreadsheet rows: territory, phone, "Apellido, Nombre", d/m/yyyy, result (last three optional).
+ * Columns are told apart by shape, so a missing date or result does not shift the others.
+ */
+export function parsePhoneHistory(text: string) {
+  const rows: PhoneHistoryRow[] = [];
+  const skipped: { line: string; reason: string }[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const fields = (line.includes("\t") ? line.split("\t") : line.split(/\s{2,}/)).map((field) => field.trim());
+    const territory = Number(fields[0]);
+    const number = normalizePhone(fields[1] ?? "");
+    const key = phoneKey(number);
+    if (!Number.isInteger(territory) || territory < 1 || key.length < 6 || key.length > 15) { skipped.push({ line, reason: "invalid" }); continue; }
+    let caller: string | null = null;
+    let date: string | null = null;
+    let activity: PhoneActivity | null = null;
+    for (const field of fields.slice(2)) {
+      if (!field) continue;
+      const day = field.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (day) { date = `${day[3]}-${day[2].padStart(2, "0")}-${day[1].padStart(2, "0")}`; continue; }
+      const known = activityByLabel.get(plain(field));
+      if (known) { activity = known; continue; }
+      caller = field;
+    }
+    rows.push({ territory_number: territory, number, number_key: key, caller, last_activity_on: date, activity });
+  }
+  return { rows, skipped };
+}
+
+/** "Pérez, Juan Carlos" -> {surname:"perez", initial:"j"}; also reads "Pérez J.". */
+export function callerKey(name: string) {
+  const comma = name.indexOf(",");
+  const surname = comma > 0 ? name.slice(0, comma) : name.split(" ")[0];
+  const given = comma > 0 ? name.slice(comma + 1) : name.split(" ").slice(1).join(" ");
+  return { surname: plain(surname), initial: plain(given).charAt(0) };
+}

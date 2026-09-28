@@ -28,8 +28,8 @@ export async function phoneTerritories(supabase: AdminSupabase): Promise<PhoneTe
  * Computes and STORES the number list for one Zoom outing (snapshot). Re-running replaces it,
  * so a later change to the phone list never alters what an outing was already given.
  */
-export async function assignPhoneNumbers(supabase: AdminSupabase, input: { slotId: string; primaryTerritoryId: string; actorId: string }) {
-  const territories = await phoneTerritories(supabase);
+export async function assignPhoneNumbers(supabase: AdminSupabase, input: { slotId: string; primaryTerritoryId: string; actorId: string | null; excludeTerritoryIds?: ReadonlySet<string> }) {
+  const territories = (await phoneTerritories(supabase)).filter((territory) => territory.id === input.primaryTerritoryId || !input.excludeTerritoryIds?.has(territory.id));
   const selection = selectTerritoriesForPhoneOuting(input.primaryTerritoryId, territories, PHONE_MINIMUM);
   const { data: numbers, error } = selection.territory_ids.length
     ? await supabase.from("territory_phone_numbers").select("id, territory_id, number").in("territory_id", selection.territory_ids).eq("active", true)
