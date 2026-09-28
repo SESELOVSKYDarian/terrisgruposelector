@@ -18,6 +18,9 @@ export function formatConductorName(fullName: string | null | undefined) {
   }
   const words = name.split(" ");
   if (words.length === 1) return words[0];
+  // Already "Apellido Inicial" ("Navarro W.", "Seselovsky Dn.", "Berlicka MT"): keep as is.
+  const last = words[words.length - 1];
+  if (last.endsWith(".") || /^[A-ZÁÉÍÓÚÑ]{1,2}$/.test(last)) return name;
   const surname = words[words.length - 1];
   return `${surname} ${words[0].charAt(0).toUpperCase()}.`;
 }
