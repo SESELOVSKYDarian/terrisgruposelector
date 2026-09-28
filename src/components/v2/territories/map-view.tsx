@@ -12,13 +12,15 @@ import { useModuleApi } from "../use-module-api";
 
 type Stats = { territory_id: string; number: number; name: string; total_blocks: number; completed_blocks: number; pending_labels: string[]; state: TerritoryMapState; open_round: { conductor: string; assigned_on: string } | null; last_completed_on: string | null; last_activity_on: string | null; do_not_visit: number; buildings: number };
 type Feature = { id: string; territory_id: string; block_id: string | null; points: Point[] };
-type State = { layer: { id: string; name: string; image_url: string; image_width: number | null; image_height: number | null } | null; features: Feature[]; stats: Stats[]; blocks: { id: string; territory_id: string; label: string }[]; canEdit: boolean };
+type State = { layer: { id: string; name: string; image_url: string; image_width: number | null; image_height: number | null } | null; features: Feature[]; stats: Stats[]; blocks: { id: string; territory_id: string; label: string }[]; rounds: { id: string; name: string; status: "OPEN" | "CLOSED" }[]; selectedRoundId: string | null; blockStatuses: Record<string, { status: string; completed_on: string | null }>; canEdit: boolean };
 
 const stateStyles: Record<TerritoryMapState, { polygon: string; label: string; pill: "slate" | "amber" | "emerald" }> = {
-  SIN_INICIAR: { polygon: "fill-slate-400/25 stroke-slate-300", label: "Sin iniciar", pill: "slate" },
-  EN_CURSO: { polygon: "fill-amber-400/35 stroke-amber-300", label: "En curso", pill: "amber" },
-  COMPLETADO: { polygon: "fill-emerald-400/35 stroke-emerald-300", label: "Completado", pill: "emerald" },
+  SIN_INICIAR: { polygon: "fill-transparent stroke-transparent hover:stroke-white/70", label: "Sin iniciar", pill: "slate" },
+  EN_CURSO: { polygon: "fill-transparent stroke-amber-300", label: "En curso", pill: "amber" },
+  COMPLETADO: { polygon: "fill-transparent stroke-emerald-300", label: "Completado", pill: "emerald" },
 };
+
+const blockNumber = (label: string) => label.replace(/\D/g, "") || label;
 
 function CreateLayerCard({ run, busy }: { run: (action: string, payload?: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
   const [name, setName] = useState("Mapa de territorios");
@@ -36,7 +38,8 @@ function CreateLayerCard({ run, busy }: { run: (action: string, payload?: Record
 
 /** Territorios → Mapa: the original JPG with clickable SVG polygons; managers draw the shapes. */
 export function MapView() {
-  const { data, error, loading, busy, run } = useModuleApi<State>("/api/v2/map");
+  const [roundId, setRoundId] = useState("");
+  const { data, error, loading, busy, run } = useModuleApi<State>(roundId ? `/api/v2/map?round=${roundId}` : "/api/v2/map");
   const imageRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -87,7 +90,13 @@ export function MapView() {
     <div className="space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Pill tone="slate">Sin iniciar</Pill><Pill tone="amber">En curso</Pill><Pill tone="emerald">Completado (última vuelta)</Pill>
+        {data.rounds.length ? (
+          <div className="w-64">
+            <Select onChange={(value) => { setRoundId(value); setSelected(null); }} options={data.rounds.map((round) => ({ value: round.id, label: `${round.name}${round.status === "OPEN" ? " (abierta)" : ""}` }))} size="compact" value={roundId || data.selectedRoundId || ""} />
+          </div>
+        ) : null}
+        <Pill tone="emerald">Manzana hecha</Pill><Pill tone="slate">Manzana pendiente</Pill>
+        <span className="text-xs text-muted">Borde verde = territorio completo · amarillo = en curso</span>
         {data.canEdit ? (
           <button className={cn(miniButtonClass, "ml-auto")} onClick={() => { setEditing((current) => !current); setDraft([]); }} type="button">
             <Pencil size={14} aria-hidden="true" />{editing ? "Salir de edición" : "Editar formas"}
@@ -116,7 +125,11 @@ export function MapView() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img alt={layer.name} className="absolute inset-0 h-full w-full select-none object-fill" draggable={false} onLoad={(event) => { const image = event.currentTarget; if (!layer.image_width && data.canEdit) void run("setImageSize", { layer_id: layer.id, width: image.naturalWidth, height: image.naturalHeight }); }} src={layer.image_url} />
           <svg aria-label="Territorios" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" role="group" viewBox="0 0 1 1">
-            {blockFeatures.map((feature) => <polygon className="fill-transparent stroke-white/60" key={feature.id} points={toSvgPoints(feature.points)} strokeDasharray="0.01 0.008" strokeWidth={1} style={{ vectorEffect: "non-scaling-stroke", pointerEvents: "none" }} />)}
+            {blockFeatures.map((feature) => {
+              const done = data.blockStatuses[feature.block_id ?? ""]?.status === "COMPLETED";
+              if (editing) return <polygon className="fill-transparent stroke-white/60" key={feature.id} points={toSvgPoints(feature.points)} strokeDasharray="0.01 0.008" strokeWidth={1} style={{ vectorEffect: "non-scaling-stroke", pointerEvents: "none" }} />;
+              return <polygon className={done ? "fill-transparent" : "fill-slate-200/95 stroke-slate-400"} key={feature.id} points={toSvgPoints(feature.points)} strokeWidth={done ? 0 : 1} style={{ vectorEffect: "non-scaling-stroke", pointerEvents: "none" }} />;
+            })}
             {territoryFeatures.map((feature) => {
               const stat = statsById.get(feature.territory_id);
               if (!stat) return null;
@@ -140,12 +153,13 @@ export function MapView() {
             })}
             {draft.length ? <polyline className="fill-primary/20 stroke-primary" points={toSvgPoints(draft)} strokeWidth={2} style={{ vectorEffect: "non-scaling-stroke", pointerEvents: "none" }} /> : null}
           </svg>
-          {territoryFeatures.map((feature) => {
-            const stat = statsById.get(feature.territory_id);
-            if (!stat) return null;
+          {!editing ? blockFeatures.map((feature) => {
+            if (data.blockStatuses[feature.block_id ?? ""]?.status === "COMPLETED") return null;
+            const label = data.blocks.find((block) => block.id === feature.block_id)?.label;
+            if (!label) return null;
             const [cx, cy] = polygonCentroid(feature.points);
-            return <span className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded bg-black/55 px-1.5 text-[11px] font-semibold text-white" key={`label-${feature.id}`} style={{ left: `${cx * 100}%`, top: `${cy * 100}%` }}>{stat.number}</span>;
-          })}
+            return <span className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 text-sm font-semibold text-slate-600" key={`n-${feature.id}`} style={{ left: `${cx * 100}%`, top: `${cy * 100}%` }}>{blockNumber(label)}</span>;
+          }) : null}
           {focus && !editing ? (() => {
             const shape = territoryFeatures.find((feature) => feature.territory_id === focus.territory_id);
             if (!shape || !hovered) return null;
@@ -165,8 +179,8 @@ export function MapView() {
             <Card title={`Territorio ${detail.number}`} description={detail.name || undefined} action={<Pill tone={stateStyles[detail.state].pill}>{stateStyles[detail.state].label}</Pill>}>
               <dl className="space-y-2 text-sm">
                 <div><dt className="text-xs text-muted">Manzanas</dt><dd className="text-foreground">{detail.completed_blocks} de {detail.total_blocks} completadas</dd></div>
-                {detail.pending_labels.length ? <div><dt className="text-xs text-muted">Pendientes</dt><dd className="text-foreground">{detail.pending_labels.join(", ")}</dd></div> : null}
-                <div><dt className="text-xs text-muted">Vuelta actual</dt><dd className="text-foreground">{detail.open_round ? `${detail.open_round.conductor} desde ${formatS13Date(detail.open_round.assigned_on)}` : "Sin vuelta abierta"}</dd></div>
+                {detail.pending_labels.length ? <div><dt className="text-xs text-muted">Pendientes</dt><dd className="text-foreground">{detail.pending_labels.map(blockNumber).map((number) => `M${number}`).join(", ")}</dd></div> : null}
+                <div><dt className="text-xs text-muted">Asignación S-13</dt><dd className="text-foreground">{detail.open_round ? `${detail.open_round.conductor} desde ${formatS13Date(detail.open_round.assigned_on)}` : "Sin asignación abierta"}</dd></div>
                 <div><dt className="text-xs text-muted">Última vez completado</dt><dd className="text-foreground">{formatS13Date(detail.last_completed_on) || "Sin registro"}</dd></div>
                 <div><dt className="text-xs text-muted">Última actividad</dt><dd className="text-foreground">{formatS13Date(detail.last_activity_on) || "Sin registro"}</dd></div>
                 <div><dt className="text-xs text-muted">Edificios · No visitar</dt><dd className="text-foreground">{detail.buildings} · {detail.do_not_visit}</dd></div>
@@ -177,7 +191,7 @@ export function MapView() {
           )}
         </aside>
       </div>
-      {!territoryFeatures.length ? <Notice tone="info">Todavía no hay formas dibujadas. Usá «Editar formas» para marcar cada territorio sobre el mapa.</Notice> : null}
+      {!territoryFeatures.length ? <Notice tone="info">Todavía no hay formas cargadas. Usá «Editar formas» para marcar cada territorio sobre el mapa.</Notice> : null}
     </div>
   );
 }

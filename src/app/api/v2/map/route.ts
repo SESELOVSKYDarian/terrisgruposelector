@@ -15,11 +15,12 @@ const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("deleteFeature"), payload: z.object({ id: z.string().uuid() }) }),
 ]);
 
-export async function GET() {
+export async function GET(request: Request) {
   return handle(async () => {
     const profile = await requireProfile();
     if (!(await getTerritoryAccess(profile)).canManage) forbid("No tenés permiso para ver el mapa de territorios.");
-    return { ...(await loadMap(createAdminSupabaseClient())), canEdit: true };
+    const round = new URL(request.url).searchParams.get("round");
+    return { ...(await loadMap(createAdminSupabaseClient(), round && /^[0-9a-f-]{36}$/i.test(round) ? round : null)), canEdit: true };
   });
 }
 
