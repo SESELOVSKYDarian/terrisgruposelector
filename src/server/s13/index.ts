@@ -14,14 +14,16 @@ export async function listS13Documents(supabase: AdminSupabase): Promise<S13Docu
 }
 
 /** Computes one S-13 document straight from the rounds in the database (never stored, never stale). */
-export async function loadS13Document(supabase: AdminSupabase, document: S13DocumentInfo) {
+export async function loadS13Document(supabase: AdminSupabase, document: S13DocumentInfo, options: { excludeTests?: boolean } = {}) {
   const { data: territories, error } = await supabase.from("territories").select("id, number").gte("number", document.first_territory).lte("number", document.last_territory).order("number");
   if (error) throw new Error(error.message);
   const ids = (territories ?? []).map((territory) => territory.id as string);
   if (!ids.length) return { document, pages: [] };
 
   const [{ data: rounds, error: roundsError }, { data: statuses, error: statusesError }] = await Promise.all([
-    supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids),
+    options.excludeTests
+      ? supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids).eq("is_test", false)
+      : supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids),
     fetchAll((from, to) => supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null).order("id").range(from, to)),
   ]);
   if (roundsError) throw new Error(roundsError.message);

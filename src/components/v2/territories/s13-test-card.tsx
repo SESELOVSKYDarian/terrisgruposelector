@@ -45,7 +45,7 @@ export function S13TestCard({ tests, onChanged }: { tests: TestInfo; onChanged: 
   const ready = Number(territory) > 0 && conductor && assigned;
 
   return (
-    <Card title="Campo de pruebas" description="Agrega una vuelta de prueba al S-13 oficial y después la borrás. Solo se pueden borrar las entradas creadas desde acá; las reales no se tocan.">
+    <Card title="Campo de pruebas" description="Agrega una vuelta de prueba al S-13 de la app y después la borrás. No se sincroniza con el documento de Drive. Solo se pueden borrar las entradas creadas desde acá; las reales no se tocan.">
       <div className="space-y-3">
         {error ? <Notice tone="error">{error}</Notice> : null}
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
