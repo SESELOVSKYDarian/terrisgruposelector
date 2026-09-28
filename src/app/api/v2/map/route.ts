@@ -13,6 +13,8 @@ const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setImageSize"), payload: z.object({ layer_id: z.string().uuid(), width: z.number().int().min(1).max(20000), height: z.number().int().min(1).max(20000) }) }),
   z.object({ action: z.literal("saveFeature"), payload: z.object({ layer_id: z.string().uuid(), territory_id: z.string().uuid(), block_id: z.string().uuid().nullable().optional(), points: z.array(z.unknown()) }) }),
   z.object({ action: z.literal("deleteFeature"), payload: z.object({ id: z.string().uuid() }) }),
+  z.object({ action: z.literal("setTerritoryNumber"), payload: z.object({ territory_id: z.string().uuid(), number: z.number().int().min(1).max(9999) }) }),
+  z.object({ action: z.literal("setBlockNumber"), payload: z.object({ block_id: z.string().uuid(), number: z.number().int().min(1).max(99) }) }),
 ]);
 
 export async function GET(request: Request) {
@@ -48,6 +50,60 @@ export async function POST(request: Request) {
       return {};
     }
 
+    // Renumbering never leaves two territories (or two blocks of one territory) with the same number:
+    // if the number is taken, the two simply trade numbers.
+    if (action === "setTerritoryNumber") {
+      const { data: current } = await supabase.from("territories").select("id, number").eq("id", payload.territory_id).maybeSingle();
+      if (!current) throw new ApiError("Territorio no encontrado.", 404);
+      if (current.number === payload.number) return { swapped: false };
+      const { data: other } = await supabase.from("territories").select("id, number").eq("number", payload.number).maybeSingle();
+      const temporary = 1_000_000 + Math.floor(Math.random() * 8_000_000);
+      const step = async (id: string, number: number) => {
+        const { error } = await supabase.from("territories").update({ number, updated_at: new Date().toISOString() }).eq("id", id);
+        if (error) throw new Error(error.message);
+      };
+      try {
+        if (other) {
+          await step(current.id, temporary);
+          await step(other.id, current.number);
+        }
+        await step(current.id, payload.number);
+      } catch (cause) {
+        await supabase.from("territories").update({ number: current.number }).eq("id", current.id);
+        if (other) await supabase.from("territories").update({ number: payload.number }).eq("id", other.id);
+        throw cause;
+      }
+      await writeAudit(supabase, { actorId: profile.id, action: "TERRITORY_RENUMBERED", entityType: "territory", entityId: current.id, before: { number: current.number }, after: { number: payload.number, swapped_with: other?.id ?? null } });
+      return { swapped: Boolean(other) };
+    }
+
+    if (action === "setBlockNumber") {
+      const { data: current } = await supabase.from("blocks").select("id, territory_id, label").eq("id", payload.block_id).maybeSingle();
+      if (!current) throw new ApiError("Manzana no encontrada.", 404);
+      const labelFor = (number: number) => (/\d+/.test(current.label as string) ? (current.label as string).replace(/\d+/, String(number)) : `Manzana ${number}`);
+      const target = labelFor(payload.number);
+      if (target === current.label) return { swapped: false };
+      const { data: other } = await supabase.from("blocks").select("id, label").eq("territory_id", current.territory_id).eq("label", target).maybeSingle();
+      const temporary = `tmp-${Math.random().toString(36).slice(2, 10)}`;
+      const step = async (id: string, label: string) => {
+        const { error } = await supabase.from("blocks").update({ label }).eq("id", id);
+        if (error) throw new Error(error.message);
+      };
+      try {
+        if (other) {
+          await step(current.id, temporary);
+          await step(other.id, current.label as string);
+        }
+        await step(current.id, target);
+      } catch (cause) {
+        await supabase.from("blocks").update({ label: current.label }).eq("id", current.id);
+        if (other) await supabase.from("blocks").update({ label: target }).eq("id", other.id);
+        throw cause;
+      }
+      await writeAudit(supabase, { actorId: profile.id, action: "BLOCK_RENUMBERED", entityType: "block", entityId: current.id, before: { label: current.label }, after: { label: target, swapped_with: other?.id ?? null } });
+      return { swapped: Boolean(other) };
+    }
+
     if (action === "deleteFeature") {
       const { data: before } = await supabase.from("territory_map_features").select("*").eq("id", payload.id).maybeSingle();
       if (!before) throw new ApiError("Forma no encontrada.", 404);
@@ -64,7 +120,8 @@ export async function POST(request: Request) {
       const { data: block } = await supabase.from("blocks").select("id").eq("id", blockId).eq("territory_id", payload.territory_id).maybeSingle();
       if (!block) throw new ApiError("La manzana no pertenece a ese territorio.", 422);
     }
-    const existing = await supabase.from("territory_map_features").select("id").eq("layer_id", payload.layer_id).eq("territory_id", payload.territory_id).is("block_id", blockId).maybeSingle();
+    const existingQuery = supabase.from("territory_map_features").select("id").eq("layer_id", payload.layer_id).eq("territory_id", payload.territory_id);
+    const existing = await (blockId ? existingQuery.eq("block_id", blockId) : existingQuery.is("block_id", null)).maybeSingle();
     if (existing.error) throw new Error(existing.error.message);
     const saved = existing.data
       ? await supabase.from("territory_map_features").update({ points: polygon.points, updated_at: new Date().toISOString() }).eq("id", existing.data.id).select("id").single()

@@ -104,8 +104,13 @@ export async function loadMap(supabase: AdminSupabase, requestedRoundId: string 
     : { data: [], error: null };
   if (statusError) throw new Error(statusError.message);
   const blockStatuses = Object.fromEntries((statusRows ?? []).map((row) => [row.block_id as string, { status: row.status as string, completed_on: (row.completed_on as string | null) ?? null }]));
-  if (!layer) return { layer: null, features: [], stats, blocks: blocks ?? [], rounds, selectedRoundId: selected?.id ?? null, blockStatuses };
+  if (!layer) return { layer: null, features: [], labels: [], badges: [], stats, blocks: blocks ?? [], rounds, selectedRoundId: selected?.id ?? null, blockStatuses };
   const { data: features, error: featuresError } = await supabase.from("territory_map_features").select("id, territory_id, block_id, points").eq("layer_id", layer.id);
   if (featuresError) throw new Error(featuresError.message);
-  return { layer, features: features ?? [], stats, blocks: blocks ?? [], rounds, selectedRoundId: selected?.id ?? null, blockStatuses };
+  // Street names and the sports zone. Before the Fase 25 migration there is no table: the map just has no texts.
+  const labelsResult = await supabase.from("territory_map_labels").select("id, kind, text, x, y, rotation, size, bold, tone, points").eq("layer_id", layer.id);
+  const labels = labelsResult.error ? [] : labelsResult.data ?? [];
+  const badgesResult = await supabase.from("territory_map_badges").select("territory_id, x, y").eq("layer_id", layer.id);
+  const badges = badgesResult.error ? [] : badgesResult.data ?? [];
+  return { layer, features: features ?? [], labels, badges, stats, blocks: blocks ?? [], rounds, selectedRoundId: selected?.id ?? null, blockStatuses };
 }
