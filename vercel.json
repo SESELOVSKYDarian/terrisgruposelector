@@ -1,4 +1,4 @@
 {
   "regions": ["pdx1"],
-  "crons": [{ "path": "/api/cron/reminders", "schedule": "*/10 * * * *" }]
+  "crons": [{ "path": "/api/cron/reminders", "schedule": "0 10 * * *" }]
 }
