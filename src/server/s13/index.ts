@@ -22,8 +22,8 @@ export async function loadS13Document(supabase: AdminSupabase, document: S13Docu
 
   const [{ data: rounds, error: roundsError }, { data: statuses, error: statusesError }] = await Promise.all([
     options.excludeTests
-      ? supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids).eq("is_test", false)
-      : supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, profiles!conductor_id(full_name)").in("territory_id", ids),
+      ? supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, is_test, profiles!conductor_id(full_name)").in("territory_id", ids).eq("is_test", false)
+      : supabase.from("territory_rounds").select("id, territory_id, assigned_on, completed_on, is_test, profiles!conductor_id(full_name)").in("territory_id", ids),
     fetchAll((from, to) => supabase.from("block_round_statuses").select("completed_on, blocks!inner(territory_id)").eq("status", "COMPLETED").not("completed_on", "is", null).order("id").range(from, to)),
   ]);
   if (roundsError) throw new Error(roundsError.message);
@@ -47,7 +47,7 @@ export async function loadS13Document(supabase: AdminSupabase, document: S13Docu
         .filter((round) => round.territory_id === territory.id)
         .map((round) => {
           const profile = Array.isArray(round.profiles) ? round.profiles[0] : round.profiles;
-          return { id: round.id as string, assigned_on: round.assigned_on as string, completed_on: (round.completed_on as string | null) ?? null, conductor_name: formatConductorName((profile as { full_name?: string } | null)?.full_name) };
+          return { id: round.id as string, assigned_on: round.assigned_on as string, completed_on: (round.completed_on as string | null) ?? null, conductor_name: formatConductorName((profile as { full_name?: string } | null)?.full_name), is_test: Boolean(round.is_test) };
         }),
     })),
   );

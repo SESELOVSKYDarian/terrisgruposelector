@@ -21,7 +21,7 @@ async function post(action: string, payload: Record<string, unknown>) {
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Test area: entries are written to the real S-13 (flagged as test) and can be deleted afterwards; real rounds are untouched. */
-export function S13TestCard({ tests, onChanged }: { tests: TestInfo; onChanged: () => void }) {
+export function S13TestCard({ tests, onChanged }: { tests: TestInfo; onChanged: (createdRoundId?: string) => void }) {
   const [territory, setTerritory] = useState("");
   const [conductor, setConductor] = useState("");
   const [assigned, setAssigned] = useState(today());
@@ -29,12 +29,12 @@ export function S13TestCard({ tests, onChanged }: { tests: TestInfo; onChanged: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function run(action: () => Promise<unknown>) {
+  async function run(action: () => Promise<{ id?: string } | unknown>) {
     setBusy(true);
     setError("");
     try {
-      await action();
-      onChanged();
+      const result = await action();
+      onChanged((result as { id?: string } | undefined)?.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Error inesperado.");
     } finally {
@@ -56,7 +56,7 @@ export function S13TestCard({ tests, onChanged }: { tests: TestInfo; onChanged: 
           <label className="grid gap-1 text-xs text-muted">Fecha asignada<input className={fieldClass} onChange={(event) => setAssigned(event.target.value)} type="date" value={assigned} /></label>
           <label className="grid gap-1 text-xs text-muted">Fecha completada (opcional)<input className={fieldClass} min={assigned} onChange={(event) => setCompleted(event.target.value)} type="date" value={completed} /></label>
           <div className="flex items-end">
-            <button className={primarySmallButtonClass} disabled={busy || !ready} onClick={() => run(async () => { await post("test_create", { territory_number: Number(territory), conductor_id: conductor, assigned_on: assigned, completed_on: completed || null }); setTerritory(""); setCompleted(""); })} type="button">Agregar entrada de prueba</button>
+            <button className={primarySmallButtonClass} disabled={busy || !ready} onClick={() => run(async () => { const created = await post("test_create", { territory_number: Number(territory), conductor_id: conductor, assigned_on: assigned, completed_on: completed || null }); setTerritory(""); setCompleted(""); return created as { id?: string }; })} type="button">Agregar entrada de prueba</button>
           </div>
         </div>
         {tests.entries.length ? (

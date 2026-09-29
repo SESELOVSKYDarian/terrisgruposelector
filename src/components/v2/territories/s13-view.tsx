@@ -24,6 +24,7 @@ export function S13View() {
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [locateRoundId, setLocateRoundId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -31,10 +32,19 @@ export function S13View() {
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error ?? "No se pudo cargar el S-13.");
-        if (active) { setState(body as State); setError(""); }
+        if (!active) return;
+        const nextState = body as State;
+        setState(nextState);
+        setError("");
+        if (locateRoundId && nextState.selected) {
+          const found = nextState.selected.pages.find((entry) => entry.rows.some((row) => row.slots.some((slot) => slot?.round_id === locateRoundId)));
+          if (found) setPage(found.page);
+          setLocateRoundId(null);
+        }
       })
       .catch((cause) => active && setError(cause instanceof Error ? cause.message : "Error inesperado."));
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, refresh]);
 
   if (error) return <Notice tone="error">{error}</Notice>;
@@ -62,7 +72,7 @@ export function S13View() {
   return (
     <div className="space-y-4">
       <SubTabs onChange={(next) => { setCode(next); setPage(1); setSyncResult(null); }} tabs={state.documents.map((entry) => ({ id: entry.code, label: entry.title }))} value={document.code} />
-      {state.tests ? <S13TestCard onChanged={() => setRefresh((value) => value + 1)} tests={state.tests} /> : null}
+      {state.tests ? <S13TestCard onChanged={(createdRoundId) => { setLocateRoundId(createdRoundId ?? null); setRefresh((value) => value + 1); }} tests={state.tests} /> : null}
       {state.tests ? (
         <div className="flex flex-wrap items-center gap-3">
           <button className={miniButtonClass} disabled={syncing} onClick={() => void syncNow()} type="button">{syncing ? "Sincronizando…" : "Sincronizar ahora con Google Docs"}</button>
@@ -91,10 +101,10 @@ export function S13View() {
                   <tr key={`${row.territory_number}-top`}>
                     <td className={cn(td, "font-semibold")} rowSpan={2}>{row.territory_number}</td>
                     <td className={td} rowSpan={2}>{formatS13Date(row.last_completed_on)}</td>
-                    {row.slots.map((slot, index) => <td className={cn(td, "font-medium")} colSpan={2} key={index}>{slot?.conductor ?? ""}</td>)}
+                    {row.slots.map((slot, index) => <td className={cn(td, "font-medium", slot?.is_test && "bg-amber-400/15 text-amber-300")} colSpan={2} key={index}>{slot?.conductor ?? ""}{slot?.is_test ? " (prueba)" : ""}</td>)}
                   </tr>,
                   <tr key={`${row.territory_number}-bottom`}>
-                    {row.slots.map((slot, index) => [<td className={td} key={`a${index}`}>{formatS13Date(slot?.assigned_on)}</td>, <td className={td} key={`c${index}`}>{formatS13Date(slot?.completed_on)}</td>])}
+                    {row.slots.map((slot, index) => [<td className={cn(td, slot?.is_test && "bg-amber-400/15")} key={`a${index}`}>{formatS13Date(slot?.assigned_on)}</td>, <td className={cn(td, slot?.is_test && "bg-amber-400/15")} key={`c${index}`}>{formatS13Date(slot?.completed_on)}</td>])}
                   </tr>,
                 ])}
               </tbody>

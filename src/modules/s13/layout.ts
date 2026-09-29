@@ -1,8 +1,8 @@
 /** Each territory shows four "Asignado a" blocks per S-13 page. */
 export const S13_SLOTS_PER_PAGE = 4;
 
-export type S13Round = { id: string; assigned_on: string; completed_on: string | null; conductor_name: string };
-export type S13Slot = { round_id: string; conductor: string; assigned_on: string; completed_on: string | null };
+export type S13Round = { id: string; assigned_on: string; completed_on: string | null; conductor_name: string; is_test: boolean };
+export type S13Slot = { round_id: string; conductor: string; assigned_on: string; completed_on: string | null; is_test: boolean };
 export type S13Row = {
   territory_number: number;
   /** "Última fecha en que se completó": last round of the previous page (page 1: legacy history, if any). */
@@ -39,7 +39,7 @@ export function buildS13Pages(territories: { number: number; rounds: S13Round[];
       rows: ordered.map((territory): S13Row => {
         const slots = Array.from({ length: S13_SLOTS_PER_PAGE }, (_, offset) => {
           const round = territory.rounds[start + offset];
-          return round ? { round_id: round.id, conductor: round.conductor_name, assigned_on: round.assigned_on, completed_on: round.completed_on } : null;
+          return round ? { round_id: round.id, conductor: round.conductor_name, assigned_on: round.assigned_on, completed_on: round.completed_on, is_test: round.is_test } : null;
         });
         return {
           territory_number: territory.number,
