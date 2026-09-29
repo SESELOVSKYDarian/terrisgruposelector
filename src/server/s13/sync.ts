@@ -98,7 +98,7 @@ async function ensurePageDocs(supabase: AdminSupabase, document: DocumentRow, ta
  */
 export async function runS13Sync(supabase: AdminSupabase, actorId: string | null, code: string) {
   const document = await loadDocument(supabase, code);
-  const { pages } = await loadS13Document(supabase, document, { excludeTests: true });
+  const { pages } = await loadS13Document(supabase, document);
   const desired = pagesToCells(pages);
   const snapshot = await readSnapshot(supabase, document.id);
   const { changes, unchanged } = diffCells(desired, snapshot);
@@ -161,7 +161,7 @@ export async function compareWithDocuments(supabase: AdminSupabase, code: string
   const target = document.sync_mode === "STAGING" ? "STAGING" : "PRODUCTION";
   const docs = await loadPageDocs(supabase, document, target);
   if (!docs.size) throw new ApiError(target === "STAGING" ? "Falta el link de la copia de prueba." : "Falta el link del documento real.", 409);
-  const { pages } = await loadS13Document(supabase, document, { excludeTests: true });
+  const { pages } = await loadS13Document(supabase, document);
   const desired = pagesToCells(pages);
   const reader = resolveReader();
   const mismatches: ReturnType<typeof reconcile> = [];

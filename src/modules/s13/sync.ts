@@ -22,7 +22,7 @@ export function pagesToCells(pages: S13Page[]): CellMap {
       if (last) cells[cellKey(page.page, row.territory_number, "last")] = last;
       row.slots.forEach((slot, index) => {
         if (!slot) return;
-        if (slot.conductor) cells[cellKey(page.page, row.territory_number, { slot: index, field: "who" })] = slot.conductor;
+        if (slot.conductor) cells[cellKey(page.page, row.territory_number, { slot: index, field: "who" })] = slot.is_test ? `${slot.conductor} (PRUEBA)` : slot.conductor;
         const from = formatS13Date(slot.assigned_on);
         if (from) cells[cellKey(page.page, row.territory_number, { slot: index, field: "from" })] = from;
         const to = formatS13Date(slot.completed_on);
