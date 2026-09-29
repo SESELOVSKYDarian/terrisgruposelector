@@ -75,7 +75,14 @@ async function ensurePageDocs(supabase: AdminSupabase, document: DocumentRow, ta
   for (const page of pagesNeedingCopy(pageCount, docs.keys())) {
     const source = docs.get(page - 1);
     if (!source) throw new Error(`No se puede crear la hoja ${page}: falta el documento de la hoja ${page - 1}.`);
-    const copy = await client.copyPage({ sourceDocumentId: source.documentId, name: `${document.title} - hoja ${page}` });
+    let copy: { documentId: string };
+    try {
+      copy = await client.copyPage({ sourceDocumentId: source.documentId, name: `${document.title} - hoja ${page}` });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "";
+      if (message.includes("storage quota")) throw new Error(`Falta la hoja ${page} del documento "${document.title}" y la cuenta de la app no puede crearla sola (no tiene cuota de Drive propia). Avisale a quien administra la sincronización para que la cree a mano y la vincule.`);
+      throw cause;
+    }
     const { error } = await supabase.from("s13_document_pages").insert({ document_id: document.id, page, target, google_document_id: copy.documentId });
     if (error) throw new Error(`Se creó la copia ${copy.documentId} pero no se pudo registrar: ${error.message}`);
     docs.set(page, { documentId: copy.documentId, prepared: false });
