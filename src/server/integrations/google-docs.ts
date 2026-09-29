@@ -4,6 +4,7 @@ import { createSign } from "node:crypto";
 
 import type { DocsBodyContent } from "@/modules/s13/doc-table";
 import { normalizePrivateKey, normalizeServiceAccountEmail } from "@/modules/s13/private-key";
+import { copyDocumentViaAppsScript } from "./apps-script-bridge";
 
 const SCOPE = "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -82,16 +83,18 @@ export async function batchUpdate(documentId: string, requests: Record<string, u
 }
 
 /**
- * Copies a Doc. When S13_DRIVE_FOLDER_ID is set the copy goes to that folder (share it with the service
- * account as editor); S13_SHARE_WITH_EMAILS (comma separated) gets editor access so people can open it
- * even though the service account owns the file.
+ * Copies a Doc. When S13_DRIVE_FOLDER_ID is set the copy goes to that folder. Creation goes through
+ * the Apps Script bridge first (a real Google account, real quota) when configured; otherwise it falls
+ * back to the service account's own Drive copy, which fails once that account's zero quota is hit.
+ * S13_SHARE_WITH_EMAILS (comma separated) gets editor access on top of whatever the copy already has.
  */
 export async function copyDocument(sourceId: string, name: string) {
   const folder = process.env.S13_DRIVE_FOLDER_ID;
-  const copy = await call<{ id: string }>(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(sourceId)}/copy?supportsAllDrives=true&fields=id`, { method: "POST", body: JSON.stringify({ name, ...(folder ? { parents: [folder] } : {}) }) });
+  const viaScript = await copyDocumentViaAppsScript(sourceId, name, folder);
+  const id = viaScript ?? (await call<{ id: string }>(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(sourceId)}/copy?supportsAllDrives=true&fields=id`, { method: "POST", body: JSON.stringify({ name, ...(folder ? { parents: [folder] } : {}) }) })).id;
   const emails = (process.env.S13_SHARE_WITH_EMAILS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
   for (const emailAddress of emails) {
-    await call(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(copy.id)}/permissions?supportsAllDrives=true&sendNotificationEmail=false`, { method: "POST", body: JSON.stringify({ type: "user", role: "writer", emailAddress }) }).catch(() => undefined);
+    await call(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/permissions?supportsAllDrives=true&sendNotificationEmail=false`, { method: "POST", body: JSON.stringify({ type: "user", role: "writer", emailAddress }) }).catch(() => undefined);
   }
-  return copy.id;
+  return id;
 }
