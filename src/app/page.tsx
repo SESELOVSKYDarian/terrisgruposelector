@@ -72,6 +72,7 @@ import { KindBadge, PlaceSuggestions, type PlaceOption } from "@/components/v2/o
 import { formatSlotTerritories } from "@/modules/outings/territory-text";
 import { AssigneePicker } from "@/components/v2/outings/assignee-picker";
 import { BlockToggleGrid } from "./_components/block-toggle-grid";
+import { BlockToggleCard, useCardLayouts } from "./_components/block-toggle-card";
 import { Select } from "./_components/select";
 import { ListToolbar, PaginationBar, useListControls } from "./_components/list-controls";
 import { SubTabs } from "@/components/v2/ui";
@@ -80,6 +81,7 @@ import { GroupOutingsPanel } from "@/components/v2/groups/group-outings-panel";
 import { MyOutingsPanel } from "@/components/v2/outings/my-outings-panel";
 import { S13View } from "@/components/v2/territories/s13-view";
 import { MapView } from "@/components/v2/territories/map-view";
+import { CardLayoutEditor } from "@/components/v2/territories/card-layout-editor";
 import { DoNotVisitPanel, DoNotVisitWarning } from "@/components/v2/do-not-visit";
 import { TelephonePanel } from "@/components/v2/telephone/telephone-panel";
 import { BuildingsBrowser } from "@/components/v2/buildings/buildings-browser";
@@ -924,8 +926,8 @@ export default function Home() {
 
 /** Territorios: one place for everything that belongs to a territory. The legacy list stays while V1 exists. */
 function TerritoriesHub({ legacy, rounds }: { legacy: ReactNode; rounds: ReactNode }) {
-  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), ...(rounds ? [{ id: "rounds" as const, label: "Vueltas" }] : []), { id: "map" as const, label: "Mapa" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "personal" as const, label: "Personales" }, { id: "dnv" as const, label: "No visitar" }];
-  const [tab, setTab] = useState<"list" | "rounds" | "map" | "s13" | "buildings" | "phone" | "personal" | "dnv">(() => {
+  const tabs = [...(legacy ? [{ id: "list" as const, label: "Territorios" }] : []), ...(rounds ? [{ id: "rounds" as const, label: "Vueltas" }] : []), { id: "map" as const, label: "Mapa" }, { id: "card" as const, label: "Tarjeta" }, { id: "s13" as const, label: "S-13" }, { id: "buildings" as const, label: "Edificios" }, { id: "phone" as const, label: "Telefónico" }, { id: "personal" as const, label: "Personales" }, { id: "dnv" as const, label: "No visitar" }];
+  const [tab, setTab] = useState<"list" | "rounds" | "map" | "card" | "s13" | "buildings" | "phone" | "personal" | "dnv">(() => {
     const requested = peekTab("territories");
     return tabs.find((entry) => entry.id === requested)?.id ?? tabs[0].id;
   });
@@ -933,7 +935,7 @@ function TerritoriesHub({ legacy, rounds }: { legacy: ReactNode; rounds: ReactNo
   return (
     <div className="space-y-4">
       <SubTabs onChange={setTab} tabs={tabs} value={tab} />
-      {tab === "list" && legacy ? legacy : tab === "rounds" && rounds ? rounds : tab === "map" ? <MapView /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : tab === "personal" ? <PersonalAssignmentsManager /> : <S13View />}
+      {tab === "list" && legacy ? legacy : tab === "rounds" && rounds ? rounds : tab === "map" ? <MapView /> : tab === "card" ? <CardLayoutEditor /> : tab === "dnv" ? <DoNotVisitPanel /> : tab === "phone" ? <TelephonePanel /> : tab === "buildings" ? <BuildingsBrowser /> : tab === "personal" ? <PersonalAssignmentsManager /> : <S13View />}
     </div>
   );
 }
@@ -2026,6 +2028,7 @@ function ConductorVisitForm({
   const [territoryId, setTerritoryId] = useState(sortedTerritories[0]?.id ?? "");
   const [visitDate, setVisitDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [doneLabels, setDoneLabels] = useState<Set<string>>(new Set());
+  const cardLayouts = useCardLayouts();
 
   const territoryBlocks = useMemo(
     () => data.blocks.filter((block) => block.territory_id === territoryId).map((block) => block.label),
@@ -2112,8 +2115,9 @@ function ConductorVisitForm({
           <p className="mt-1 text-xs text-slate-400">Toca las que se completaron en esta visita. Las que queden sin tocar se guardan como pendientes.</p>
           <div className="mt-3">
             {pendingLabels.length ? (
-              <BlockToggleGrid
+              <BlockToggleCard
                 blocks={pendingLabels.map((label) => ({ id: label, label }))}
+                layout={cardLayouts[territoryId]}
                 onToggle={toggle}
                 selectedIds={doneLabels}
               />

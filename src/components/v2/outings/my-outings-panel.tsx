@@ -6,6 +6,7 @@ import { Select } from "@/app/_components/select";
 import { miniButtonClass, primarySmallButtonClass, secondaryButtonClass } from "@/app/_components/ui-classes";
 import { formatDateEs } from "@/modules/outings/time";
 import { cn } from "@/lib/utils";
+import { BlockToggleCard, useCardLayouts } from "@/app/_components/block-toggle-card";
 import { useHighlight } from "../highlight";
 import { DoNotVisitWarning } from "../do-not-visit";
 import { PhoneResults, type PhoneBlock } from "../telephone/phone-results";
@@ -30,6 +31,7 @@ function ReportForm({ slot, state, onCancel, run, busy }: { slot: Slot; state: S
   const [notes, setNotes] = useState(slot.report?.notes ?? "");
   const [adding, setAdding] = useState("");
   const [localError, setLocalError] = useState("");
+  const cardLayouts = useCardLayouts();
 
   function toggle(territoryId: string, label: string) {
     setEntries((current) => current.map((entry) => (entry.territory_id === territoryId ? { ...entry, done_labels: entry.done_labels.includes(label) ? entry.done_labels.filter((item) => item !== label) : [...entry.done_labels, label] } : entry)));
@@ -69,16 +71,13 @@ function ReportForm({ slot, state, onCancel, run, busy }: { slot: Slot; state: S
             <DoNotVisitWarning items={(entry.do_not_visit ?? []).map((address) => ({ id: `${entry.territory_id}:${address}`, number: entry.number, address }))} />
             {entry.prior_done.length ? <p className="text-xs text-muted">Ya hechas en esta vuelta: {entry.prior_done.join(", ")}</p> : null}
             {remaining.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {remaining.map((label) => {
-                  const done = entry.done_labels.includes(label);
-                  return (
-                    <button aria-pressed={done} className={cn("min-h-9 min-w-10 rounded-lg border px-2.5 text-sm font-medium transition", done ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100" : "border-border text-foreground/80 hover:bg-foreground/[0.05]")} disabled={locked} key={label} onClick={() => toggle(entry.territory_id, label)} type="button">
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              <BlockToggleCard
+                blocks={remaining.map((label) => ({ id: label, label }))}
+                disabled={locked}
+                layout={cardLayouts[entry.territory_id]}
+                onToggle={(label) => toggle(entry.territory_id, label)}
+                selectedIds={new Set(entry.done_labels)}
+              />
             ) : (
               <p className="text-xs text-muted">{entry.labels.length ? "No quedan manzanas pendientes." : "Este territorio no tiene manzanas cargadas."}</p>
             )}
