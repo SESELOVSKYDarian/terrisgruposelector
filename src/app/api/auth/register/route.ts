@@ -1,10 +1,13 @@
 import { createAdminSupabaseClient, hashPassword } from "@/lib/server/auth";
 import { fail, ok } from "@/lib/server/responses";
 import { deriveFullNameFromUsername, isEmailValid, isPasswordValid } from "@/lib/domain";
+import { SELF_REGISTRATION_ENABLED } from "@/lib/feature-flags";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (!SELF_REGISTRATION_ENABLED) return fail("El registro está deshabilitado. Pedile a quien administra que te cree la cuenta.", 403);
+
   const { username, email, password } = (await request.json()) as {
     username?: string;
     email?: string;

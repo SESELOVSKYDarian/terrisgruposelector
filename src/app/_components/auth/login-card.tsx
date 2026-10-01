@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Eye, EyeOff, KeyRound, Lock, User } from "lucide-react";
 import { AuthLayout } from "./auth-layout";
 import { secondaryButtonClass } from "../ui-classes";
+import { SELF_REGISTRATION_ENABLED } from "@/lib/feature-flags";
 
 export function LoginCard({
   error,
@@ -84,12 +85,14 @@ export function LoginCard({
       <button className="mt-5 block w-full text-center text-sm text-primary-hover transition hover:underline" onClick={onForgotPassword} type="button">
         ¿Olvidaste tu contraseña?
       </button>
-      <p className="mt-3 text-center text-sm text-muted">
-        ¿No tenes cuenta?{" "}
-        <button className="text-primary-hover transition hover:underline" onClick={onRegister} type="button">
-          Crear cuenta
-        </button>
-      </p>
+      {SELF_REGISTRATION_ENABLED ? (
+        <p className="mt-3 text-center text-sm text-muted">
+          ¿No tenes cuenta?{" "}
+          <button className="text-primary-hover transition hover:underline" onClick={onRegister} type="button">
+            Crear cuenta
+          </button>
+        </p>
+      ) : null}
     </AuthLayout>
   );
 }

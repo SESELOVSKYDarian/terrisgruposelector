@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { SELF_REGISTRATION_ENABLED } from "@/lib/feature-flags";
 
 export function AuthChoiceScreen({ onLogin, onRegister }: { onLogin: () => void; onRegister: () => void }) {
   return (
@@ -35,15 +36,17 @@ export function AuthChoiceScreen({ onLogin, onRegister }: { onLogin: () => void;
           >
             Iniciar sesion
           </motion.button>
-          <motion.button
-            className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-sm font-medium text-white backdrop-blur-sm"
-            onClick={onRegister}
-            type="button"
-            whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.18)" }}
-            whileTap={{ scale: 0.97 }}
-          >
-            Crear cuenta
-          </motion.button>
+          {SELF_REGISTRATION_ENABLED ? (
+            <motion.button
+              className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-sm font-medium text-white backdrop-blur-sm"
+              onClick={onRegister}
+              type="button"
+              whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.18)" }}
+              whileTap={{ scale: 0.97 }}
+            >
+              Crear cuenta
+            </motion.button>
+          ) : null}
         </motion.div>
       </motion.div>
     </main>
