@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
 import { canAccessTerritory, getBuildingAccess } from "@/server/buildings/access";
-import { createBuilding, decideProposal, listBuildings, loadBuilding, proposeBuilding, saveStructure } from "@/server/buildings";
+import { bulkCreateBuildings, createBuilding, decideProposal, listBuildings, loadBuilding, proposeBuilding, saveStructure } from "@/server/buildings";
 import { writeAudit } from "@/server/outings/planning";
 import { applyCensusCorrection, censusPhoto, dismissCensus, listPendingCensus, reportMissingCensus } from "@/server/buildings/census";
 import { censusReasons } from "@/modules/buildings/structure";
@@ -17,6 +17,7 @@ const unit = z.object({ id: z.string().uuid().nullable(), label: z.string().max(
 
 const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), payload: z.object({ territory_id: z.string().uuid(), address, labels: z.array(z.string().max(40)).max(300).optional(), columns: z.number().int().min(1).max(20).optional() }) }),
+  z.object({ action: z.literal("bulkCreate"), payload: z.object({ text: z.string().min(1).max(100000) }) }),
   z.object({ action: z.literal("propose"), payload: z.object({ territory_id: z.string().uuid(), address }) }),
   z.object({ action: z.literal("decideProposal"), payload: z.object({ id: z.string().uuid(), approve: z.boolean(), note: z.string().max(400).nullable().optional() }) }),
   z.object({ action: z.literal("saveStructure"), payload: z.object({ building_id: z.string().uuid(), expected_version: z.number().int().min(1), units: z.array(unit).max(300) }) }),
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
     if (action === "applyCorrection") return applyCensusCorrection(supabase, profile, payload.id);
     if (action === "dismissCensus") return dismissCensus(supabase, profile, payload);
     if (action === "create") return { id: await createBuilding(supabase, { ...payload, actorId: profile.id }) };
+    if (action === "bulkCreate") return bulkCreateBuildings(supabase, profile.id, payload.text);
     if (action === "decideProposal") return decideProposal(supabase, profile, payload);
     if (action === "saveStructure") return saveStructure(supabase, profile.id, payload);
 

@@ -5,6 +5,28 @@ export const MAX_UNITS = 300;
 export const MAX_LABEL_LENGTH = 20;
 export const MAX_GRID = 99;
 
+export type BulkBuildingRow = { territory_number: number; address: string; labels: string[] };
+
+/** One building per line: "Territorio<TAB>Dirección<TAB>Timbre1,Timbre2,...". Tab or ";" both work; timbres are optional. */
+export function parseBulkBuildings(text: string): { rows: BulkBuildingRow[]; invalid: number } {
+  const rows: BulkBuildingRow[] = [];
+  let invalid = 0;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const [territoryRaw, addressRaw, labelsRaw] = line.split(/\t|;/).map((part) => part.trim());
+    const territory_number = Number(territoryRaw);
+    const address = (addressRaw ?? "").replace(/\s+/g, " ");
+    if (!territoryRaw || !Number.isInteger(territory_number) || territory_number <= 0 || address.length < 3) {
+      invalid += 1;
+      continue;
+    }
+    const labels = (labelsRaw ?? "").split(",").map((label) => label.trim()).filter(Boolean);
+    rows.push({ territory_number, address, labels });
+  }
+  return { rows, invalid };
+}
+
 export function normalizeLabel(label: string) {
   return label.normalize("NFC").trim().replace(/\s+/g, " ");
 }

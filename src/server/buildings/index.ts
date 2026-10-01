@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SessionProfile } from "@/lib/server/auth";
-import { autoLayout, validateUnits, type Unit } from "@/modules/buildings/structure";
+import { autoLayout, parseBulkBuildings, validateUnits, type Unit } from "@/modules/buildings/structure";
 import { ApiError } from "@/server/api";
 import { resolveTerritoryManagerIds, safeEmit, writeAudit, type AdminSupabase } from "@/server/outings/planning";
 import { evaluateRound } from "./rounds";
@@ -80,6 +80,36 @@ export async function createBuilding(supabase: AdminSupabase, input: { territory
   }
   await writeAudit(supabase, { actorId: input.actorId, action: "BUILDING_CREATED", entityType: "building", entityId: building.id, metadata: { territory_id: input.territory_id }, after: { address, units: layout.units.length } });
   return building.id as string;
+}
+
+/** One paste, many buildings: each line resolves its own territory by number and is created independently (one bad line never blocks the rest). */
+export async function bulkCreateBuildings(supabase: AdminSupabase, actorId: string, text: string) {
+  const { rows, invalid } = parseBulkBuildings(text);
+  if (!rows.length) return { created: 0, duplicates: 0, invalid, unknown_territories: [] };
+
+  const numbers = [...new Set(rows.map((row) => row.territory_number))];
+  const { data: territories, error } = await supabase.from("territories").select("id, number").in("number", numbers).eq("active", true);
+  if (error) throw new Error(error.message);
+  const idByNumber = new Map((territories ?? []).map((territory) => [territory.number as number, territory.id as string]));
+
+  let created = 0;
+  let duplicates = 0;
+  const unknownTerritories = new Set<number>();
+  for (const row of rows) {
+    const territoryId = idByNumber.get(row.territory_number);
+    if (!territoryId) {
+      unknownTerritories.add(row.territory_number);
+      continue;
+    }
+    try {
+      await createBuilding(supabase, { territory_id: territoryId, address: row.address, labels: row.labels, actorId });
+      created += 1;
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) duplicates += 1;
+      else throw cause;
+    }
+  }
+  return { created, duplicates, invalid, unknown_territories: [...unknownTerritories].sort((a, b) => a - b) };
 }
 
 /** Someone working the territory reports a building; Servicio/Territorios approve or reject it. */

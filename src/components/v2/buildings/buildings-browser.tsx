@@ -15,6 +15,49 @@ import { lockUnitLabels, type LockDuration } from "@/modules/buildings/activity"
 type Item = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number };
 type Proposal = { id: string; territory_id: string; territory_number: number; address: string; author: string | null };
 type State = { canManage: boolean; lock: LockDuration | null; buildings: Item[]; census: CensusRow[]; territories: { id: string; number: number; name: string | null }[]; proposals: Proposal[] };
+type BulkResult = { created: number; duplicates: number; invalid: number; unknown_territories: number[] };
+
+/** Many buildings at once: one per line, "Territorio[TAB]Dirección[TAB]Timbres separados por coma]". */
+function BulkImportCard({ onChanged }: { onChanged: () => Promise<void> }) {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<BulkResult | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    setBusy(true);
+    setResult(null);
+    setError("");
+    try {
+      const response = await fetch("/api/v2/buildings", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bulkCreate", payload: { text } }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error ?? "No se pudo importar.");
+      setResult(body as BulkResult);
+      setText("");
+      await onChanged();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Error inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card description="Pegá varios edificios de una, uno por línea: Territorio, Dirección y (opcional) los timbres separados por coma. Ej: 12\tPaso 456\tA,B,C,D" title="Carga masiva de edificios">
+      <div className="space-y-2">
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {result ? (
+          <Notice tone={result.invalid || result.unknown_territories.length ? "warning" : "success"}>
+            {result.created} creado{result.created === 1 ? "" : "s"}, {result.duplicates} ya exist{result.duplicates === 1 ? "ía" : "ían"}, {result.invalid} línea{result.invalid === 1 ? "" : "s"} inválida{result.invalid === 1 ? "" : "s"}
+            {result.unknown_territories.length ? `; territorios inexistentes: ${result.unknown_territories.join(", ")}` : ""}.
+          </Notice>
+        ) : null}
+        <textarea className="min-h-32 w-full rounded-lg border border-border bg-background px-2.5 py-2 font-mono text-xs text-foreground outline-none focus:border-primary/60" onChange={(event) => setText(event.target.value)} placeholder={"12\tPaso 456\tA,B,C,D\n12\tPaso 460"} value={text} />
+        <button className={primarySmallButtonClass} disabled={busy || !text.trim()} onClick={() => void send()} type="button">Importar</button>
+      </div>
+    </Card>
+  );
+}
 
 /** Temporary lock after a doorbell was worked without a revisit: configurable, never a hardcoded 30 days. */
 function LockSetting({ lock, run, busy }: { lock: LockDuration; run: (action: string, payload?: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
@@ -70,6 +113,7 @@ export function BuildingsBrowser({ territoryId, detailExtras }: { territoryId?: 
       </div>
 
       {data.canManage && data.lock ? <LockSetting busy={busy} lock={data.lock} run={run} /> : null}
+      {data.canManage ? <BulkImportCard onChanged={reload} /> : null}
 
       <CensusInbox busy={busy} items={data.census} onOpenEditor={(row) => { setEvidence(row); setOpenId(row.building_id); }} run={run} />
 
