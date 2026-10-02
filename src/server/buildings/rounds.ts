@@ -24,7 +24,7 @@ export async function progressOfRound(supabase: AdminSupabase, buildingId: strin
  * next one. Building rounds are independent of the S-13, and temporary locks are properties of
  * the marks themselves, so they keep applying in the new round.
  */
-export async function evaluateRound(supabase: AdminSupabase, buildingId: string, actorId: string, now = new Date()): Promise<{ closed: number | null }> {
+export async function evaluateRound(supabase: AdminSupabase, buildingId: string, actorId: string | null, now = new Date()): Promise<{ closed: number | null }> {
   const { data: round, error } = await supabase.from("building_rounds").select("id, round_number").eq("building_id", buildingId).is("closed_at", null).maybeSingle();
   if (error) throw new Error(error.message);
   if (!round) return { closed: null };

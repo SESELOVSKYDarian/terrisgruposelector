@@ -130,6 +130,60 @@ export async function markUnit(supabase: AdminSupabase, profile: SessionProfile,
   return { id: data.id as string, outcome, round_id: roundId, building_id: context.building.id, round_closed: evaluation.closed };
 }
 
+const NO_RETURN_UNTIL = "2099-12-31T00:00:00Z";
+
+/**
+ * The public site has no accounts: marks coming from it are anonymous (user_id null) and the
+ * bridge itself is the authority. "No volver" becomes a lock until 2099 that a manager can lift.
+ */
+export async function markUnitAnonymous(supabase: AdminSupabase, input: MarkInput & { no_return?: boolean }, now = new Date()) {
+  const context = await loadUnitContext(supabase, input.unit_id);
+  if (!context || !context.unit.active || context.building.status !== "ACTIVE") throw new ApiError("Ese departamento no está disponible.", 404);
+  if (!input.attended && input.interested) throw new ApiError("No se puede mostrar interés sin haber sido atendido.", 422);
+
+  const status = unitStatus(await unitHistory(supabase, input.unit_id), now);
+  if (status.state !== "DISPONIBLE") throw new ApiError(status.state === "REVISITA" ? "Este departamento es una revisita." : "Este departamento está bloqueado temporalmente.", 409);
+
+  const interested = input.attended ? (input.no_return ? false : Boolean(input.interested)) : null;
+  const outcome = outcomeFor(input.attended, interested);
+  const roundId = await ensureOpenRound(supabase, context.building.id);
+  const lock = await getLockDuration(supabase);
+  const nextAvailable = input.no_return ? NO_RETURN_UNTIL : outcome === "TRABAJADO" ? addLock(now, lock).toISOString() : null;
+  const { data, error } = await supabase
+    .from("building_unit_activity")
+    .insert({ building_id: context.building.id, unit_id: context.unit.id, round_id: roundId, user_id: null, attended: input.attended, interested, outcome, worked_at: now.toISOString(), next_available_at: nextAvailable, revisit_active: outcome === "REVISITA" })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "No se pudo registrar el resultado.");
+  await writeAudit(supabase, { actorId: null, action: input.no_return ? "UNIT_NO_RETURN_MARKED" : outcome === "REVISITA" ? "UNIT_REVISIT_MARKED" : "UNIT_WORKED", entityType: "building_unit", entityId: context.unit.id, metadata: { building_id: context.building.id, territory_id: context.building.territory_id, round_id: roundId, unit: context.unit.label, source: "WEB" }, after: { attended: input.attended, interested, outcome } });
+  const evaluation = await evaluateRound(supabase, context.building.id, null, now);
+  return { id: data.id as string, outcome, building_id: context.building.id, round_closed: evaluation.closed };
+}
+
+export async function releaseRevisitAnonymous(supabase: AdminSupabase, unitId: string, now = new Date()) {
+  const context = await loadUnitContext(supabase, unitId);
+  if (!context) throw new ApiError("Departamento no encontrado.", 404);
+  const status = unitStatus(await unitHistory(supabase, unitId), now);
+  if (status.state !== "REVISITA" || !status.last_activity_id) throw new ApiError("Ese departamento no tiene una revisita activa.", 409);
+  const { error } = await supabase.from("building_unit_activity").update({ revisit_active: false, revisit_released_at: now.toISOString() }).eq("id", status.last_activity_id);
+  if (error) throw new Error(error.message);
+  await writeAudit(supabase, { actorId: null, action: "UNIT_REVISIT_RELEASED", entityType: "building_unit", entityId: unitId, metadata: { building_id: context.building.id, source: "WEB" } });
+  return { building_id: context.building.id };
+}
+
+/** Current state of every active doorbell of a building, with no viewer (the public site shows the same to everyone). */
+export async function loadUnitStatusesPublic(supabase: AdminSupabase, buildingId: string, now = new Date()) {
+  const { data: units, error } = await supabase.from("building_units").select("id").eq("building_id", buildingId).eq("active", true);
+  if (error) throw new Error(error.message);
+  const ids = (units ?? []).map((unit) => unit.id as string);
+  const statuses: Record<string, UnitStatus> = {};
+  if (!ids.length) return statuses;
+  const { data: rows, error: activityError } = await supabase.from("building_unit_activity").select(ACTIVITY_COLUMNS).in("unit_id", ids);
+  if (activityError) throw new Error(activityError.message);
+  for (const id of ids) statuses[id] = unitStatus(((rows ?? []) as ActivityRow[]).filter((row) => row.unit_id === id), now);
+  return statuses;
+}
+
 /** Undo keeps the row (undone_at/by) so the history explains what happened. */
 export async function undoActivity(supabase: AdminSupabase, profile: SessionProfile, access: BuildingAccess, input: { id: string; reason?: string | null }, now = new Date()) {
   const { data: row, error } = await supabase.from("building_unit_activity").select(`${ACTIVITY_COLUMNS}, building_id`).eq("id", input.id).maybeSingle();

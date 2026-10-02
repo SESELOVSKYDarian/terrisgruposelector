@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/server/auth";
 import { ApiError, forbid, handle, parseBody, requireProfile } from "@/server/api";
 import { canAccessTerritory, getBuildingAccess } from "@/server/buildings/access";
-import { bulkCreateBuildings, createBuilding, decideProposal, listBuildings, loadBuilding, proposeBuilding, saveStructure } from "@/server/buildings";
+import { bulkCreateBuildings, createBuilding, decideProposal, listBuildings, loadBuilding, proposalPhoto, proposeBuilding, saveStructure, setNeedsCensus } from "@/server/buildings";
 import { writeAudit } from "@/server/outings/planning";
 import { applyCensusCorrection, censusPhoto, dismissCensus, listPendingCensus, reportMissingCensus } from "@/server/buildings/census";
 import { censusReasons } from "@/modules/buildings/structure";
@@ -19,7 +19,8 @@ const mutation = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), payload: z.object({ territory_id: z.string().uuid(), address, labels: z.array(z.string().max(40)).max(300).optional(), columns: z.number().int().min(1).max(20).optional() }) }),
   z.object({ action: z.literal("bulkCreate"), payload: z.object({ text: z.string().min(1).max(100000) }) }),
   z.object({ action: z.literal("propose"), payload: z.object({ territory_id: z.string().uuid(), address }) }),
-  z.object({ action: z.literal("decideProposal"), payload: z.object({ id: z.string().uuid(), approve: z.boolean(), note: z.string().max(400).nullable().optional() }) }),
+  z.object({ action: z.literal("decideProposal"), payload: z.object({ id: z.string().uuid(), approve: z.boolean(), note: z.string().max(400).nullable().optional(), territory_id: z.string().uuid().nullable().optional() }) }),
+  z.object({ action: z.literal("setNeedsCensus"), payload: z.object({ building_id: z.string().uuid(), value: z.boolean() }) }),
   z.object({ action: z.literal("saveStructure"), payload: z.object({ building_id: z.string().uuid(), expected_version: z.number().int().min(1), units: z.array(unit).max(300) }) }),
   z.object({ action: z.literal("reportCensus"), payload: z.object({ building_id: z.string().uuid(), base_version: z.number().int().min(1), reason: z.enum(censusReasons), description: z.string().max(1500).nullable().optional(), photo_data: z.string().max(900000).nullable().optional(), diff: z.array(z.unknown()).max(50).nullable().optional() }) }),
   z.object({ action: z.literal("applyCorrection"), payload: z.object({ id: z.string().uuid() }) }),
@@ -54,6 +55,13 @@ export async function GET(request: NextRequest) {
       return { photo: await censusPhoto(supabase, photoId) };
     }
 
+    const proposalPhotoId = params.get("proposalPhoto");
+    if (proposalPhotoId) {
+      if (!access.canManage) forbid("Solo Servicio o Territorios ven las fotos de las solicitudes.");
+      if (!z.string().uuid().safeParse(proposalPhotoId).success) throw new ApiError("Solicitud inválida.", 422);
+      return { photo: await proposalPhoto(supabase, proposalPhotoId) };
+    }
+
     const territoryId = params.get("territory") ?? undefined;
     if (territoryId && !z.string().uuid().safeParse(territoryId).success) throw new ApiError("Territorio inválido.", 422);
     if (territoryId && !canAccessTerritory(access, territoryId)) forbid("No tenés acceso a los edificios de ese territorio.");
@@ -61,7 +69,7 @@ export async function GET(request: NextRequest) {
     const [buildings, proposals, census, territories] = await Promise.all([
       listBuildings(supabase, { territoryIds: access.territoryIds, territoryId, q: params.get("q") ?? undefined }),
       access.canManage
-        ? supabase.from("building_proposals").select("id, territory_id, address, created_at, profiles!proposed_by(full_name), territories(number)").eq("status", "PENDING").order("created_at")
+        ? supabase.from("building_proposals").select("id, territory_id, address, created_at, unit_count, source, photo_data, profiles!proposed_by(full_name), territories(number)").eq("status", "PENDING").order("created_at")
         : Promise.resolve({ data: [], error: null }),
       access.canManage ? listPendingCensus(supabase) : Promise.resolve([]),
       // Territories the caller can attach a building/proposal to.
@@ -81,7 +89,7 @@ export async function GET(request: NextRequest) {
       proposals: (proposals.data ?? []).map((row) => {
         const author = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
         const territory = Array.isArray(row.territories) ? row.territories[0] : row.territories;
-        return { id: row.id, territory_id: row.territory_id, territory_number: (territory as { number?: number } | null)?.number ?? 0, address: row.address, created_at: row.created_at, author: (author as { full_name?: string } | null)?.full_name ?? null };
+        return { id: row.id, territory_id: row.territory_id, territory_number: (territory as { number?: number } | null)?.number ?? 0, address: row.address, created_at: row.created_at, author: (author as { full_name?: string } | null)?.full_name ?? (row.source === "WEB" ? "Sitio web" : null), unit_count: row.unit_count ?? null, has_photo: Boolean(row.photo_data) };
       }),
     };
   });
@@ -113,6 +121,7 @@ export async function POST(request: Request) {
     if (action === "bulkCreate") return bulkCreateBuildings(supabase, profile.id, payload.text);
     if (action === "decideProposal") return decideProposal(supabase, profile, payload);
     if (action === "saveStructure") return saveStructure(supabase, profile.id, payload);
+    if (action === "setNeedsCensus") return setNeedsCensus(supabase, profile.id, payload.building_id, payload.value);
 
     const { error } = await supabase.from("buildings").update({ status: payload.active ? "ACTIVE" : "INACTIVE", updated_at: new Date().toISOString() }).eq("id", payload.building_id);
     if (error) throw new Error(error.message);

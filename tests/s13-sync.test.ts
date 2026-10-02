@@ -5,7 +5,7 @@ import { buildS13Pages } from "../src/modules/s13/layout";
 import { buildReplaceRequests, cellCoordinates, cellKey, decideWrite, diffCells, pagesToCells, parseCellKey, reconcile } from "../src/modules/s13/sync";
 
 const pages = buildS13Pages([
-  { number: 24, rounds: [{ id: "r1", assigned_on: "2026-07-05", completed_on: "2026-07-05", conductor_name: "Petroff G." }, { id: "r2", assigned_on: "2026-08-10", completed_on: "2026-08-10", conductor_name: "Navarro W." }] },
+  { number: 24, rounds: [{ id: "r1", assigned_on: "2026-07-05", completed_on: "2026-07-05", conductor_name: "Petroff G.", is_test: false }, { id: "r2", assigned_on: "2026-08-10", completed_on: "2026-08-10", conductor_name: "Navarro W.", is_test: false }] },
   { number: 25, rounds: [] },
 ]);
 

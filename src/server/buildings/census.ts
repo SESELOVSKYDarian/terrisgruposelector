@@ -40,6 +40,7 @@ export async function reportMissingCensus(supabase: AdminSupabase, profile: Sess
     .select("id")
     .single();
   if (error || !data) throw new Error(error?.message ?? "No se pudo registrar el informe.");
+  await supabase.from("buildings").update({ needs_census: true, updated_at: new Date().toISOString() }).eq("id", building.id);
   await writeAudit(supabase, { actorId: profile.id, action: "BUILDING_CENSUS_REPORTED", entityType: "building_census_report", entityId: data.id, metadata: { building_id: building.id, reason: input.reason, has_diff: Boolean(diff), has_photo: Boolean(input.photo_data) } });
 
   const title = `${profile.full_name} informa que falta censar ${building.address} (Territorio ${building.territory_number}).`;
@@ -50,11 +51,45 @@ export async function reportMissingCensus(supabase: AdminSupabase, profile: Sess
   return { id: data.id as string };
 }
 
+export type WebCensusInput = { building_id: string; reason: CensusReason; description?: string | null; photo_data?: string | null; contact?: string | null };
+
+/**
+ * Same report, but from the public site (no account). Needs a photo of the doorbells or a written
+ * reason, flags the building as "falta censar" right away and notifies the territory managers.
+ */
+export async function reportCensusFromWeb(supabase: AdminSupabase, input: WebCensusInput) {
+  const building = await loadBuilding(supabase, input.building_id);
+  if (!building) throw new ApiError("Edificio no encontrado.", 404);
+  if (!censusReasons.includes(input.reason)) throw new ApiError("Motivo inválido.", 422);
+  const description = (input.description ?? "").trim();
+  if (!description && !input.photo_data) throw new ApiError("Subí una foto de los timbres o contanos qué pasa.", 422);
+  if (input.reason === "OTRO" && !description) throw new ApiError("Contanos qué pasa con el edificio.", 422);
+  if (description.length > 1500) throw new ApiError("La descripción es demasiado larga.", 422);
+  if (input.photo_data && (!input.photo_data.startsWith(PHOTO_PREFIX) || input.photo_data.length > MAX_PHOTO_LENGTH)) throw new ApiError("La foto debe ser un JPEG de hasta unos 600 KB.", 422);
+  const contact = (input.contact ?? "").trim().slice(0, 120);
+  const fullDescription = [description, contact ? `Contacto: ${contact}` : ""].filter(Boolean).join("\n\n") || null;
+
+  const { data, error } = await supabase
+    .from("building_census_reports")
+    .insert({ building_id: building.id, territory_id: building.territory_id, reporter_id: null, reason: input.reason, description: fullDescription, photo_data: input.photo_data || null, diff: null, base_version: building.structure_version, source: "WEB" })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "No se pudo registrar el informe.");
+  await supabase.from("buildings").update({ needs_census: true, updated_at: new Date().toISOString() }).eq("id", building.id);
+  await writeAudit(supabase, { actorId: null, action: "BUILDING_CENSUS_REPORTED", entityType: "building_census_report", entityId: data.id, metadata: { building_id: building.id, reason: input.reason, has_photo: Boolean(input.photo_data), source: "WEB" } });
+
+  const title = `Desde el sitio web informan que falta censar ${building.address} (Territorio ${building.territory_number}).`;
+  for (const recipientId of await resolveTerritoryManagerIds(supabase)) {
+    await safeEmit({ type: "BUILDING_CENSUS_CORRECTION", naturalKey: `building-census:${data.id}:${recipientId}`, actorId: null, payload: { recipientId, correctionId: data.id, title } });
+  }
+  return { id: data.id as string };
+}
+
 /** Pending reports for managers (photo is fetched separately to keep the list light). */
 export async function listPendingCensus(supabase: AdminSupabase) {
   const { data, error } = await supabase
     .from("building_census_reports")
-    .select("id, building_id, reason, description, diff, base_version, created_at, photo_data, buildings(address, structure_version, territories(number)), profiles!reporter_id(full_name)")
+    .select("id, building_id, reason, description, diff, base_version, created_at, photo_data, source, buildings(address, structure_version, territories(number)), profiles!reporter_id(full_name)")
     .eq("status", "PENDING")
     .order("created_at");
   if (error) throw new Error(error.message);
@@ -73,7 +108,7 @@ export async function listPendingCensus(supabase: AdminSupabase) {
       base_version: row.base_version as number,
       current_version: (building as { structure_version?: number } | null)?.structure_version ?? row.base_version,
       has_photo: Boolean(row.photo_data),
-      reporter: (reporter as { full_name?: string } | null)?.full_name ?? null,
+      reporter: (reporter as { full_name?: string } | null)?.full_name ?? (row.source === "WEB" ? "Sitio web" : null),
       created_at: row.created_at as string,
     };
   });

@@ -6,11 +6,11 @@ import { ApiError } from "@/server/api";
 import { resolveTerritoryManagerIds, safeEmit, writeAudit, type AdminSupabase } from "@/server/outings/planning";
 import { evaluateRound } from "./rounds";
 
-export type BuildingListItem = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number };
+export type BuildingListItem = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; unit_count: number; needs_census: boolean };
 
 /** Buildings the caller may see (null territoryIds = every territory), optionally filtered by text/territory. */
 export async function listBuildings(supabase: AdminSupabase, options: { territoryIds: Set<string> | null; territoryId?: string; q?: string }): Promise<BuildingListItem[]> {
-  let query = supabase.from("buildings").select("id, territory_id, address, status, structure_version, territories(number), building_units(id, active)").order("address");
+  let query = supabase.from("buildings").select("id, territory_id, address, status, structure_version, needs_census, territories(number), building_units(id, active)").order("address");
   if (options.territoryId) query = query.eq("territory_id", options.territoryId);
   if (options.territoryIds) {
     if (!options.territoryIds.size) return [];
@@ -30,6 +30,7 @@ export async function listBuildings(supabase: AdminSupabase, options: { territor
         status: row.status as string,
         structure_version: row.structure_version as number,
         unit_count: ((row.building_units as { active: boolean }[] | null) ?? []).filter((unit) => unit.active).length,
+        needs_census: Boolean(row.needs_census),
       };
     })
     .filter((item) => !term || item.address.toLowerCase().includes(term) || `territorio ${item.territory_number}`.includes(term))
@@ -37,7 +38,7 @@ export async function listBuildings(supabase: AdminSupabase, options: { territor
 }
 
 export async function loadBuilding(supabase: AdminSupabase, buildingId: string) {
-  const { data, error } = await supabase.from("buildings").select("id, territory_id, address, status, structure_version, territories(number, name)").eq("id", buildingId).maybeSingle();
+  const { data, error } = await supabase.from("buildings").select("id, territory_id, address, status, structure_version, needs_census, territories(number, name)").eq("id", buildingId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
   const { data: units, error: unitsError } = await supabase.from("building_units").select("id, label, row_index, col_index").eq("building_id", buildingId).eq("active", true).order("row_index").order("col_index");
@@ -50,8 +51,18 @@ export async function loadBuilding(supabase: AdminSupabase, buildingId: string) 
     address: data.address as string,
     status: data.status as string,
     structure_version: data.structure_version as number,
+    needs_census: Boolean(data.needs_census),
     units: (units ?? []).map((unit) => ({ id: unit.id as string, label: unit.label as string, row: unit.row_index as number, col: unit.col_index as number })) as Unit[],
   };
+}
+
+/** Managers mark a building as "falta censar" (or as censused again) by hand. */
+export async function setNeedsCensus(supabase: AdminSupabase, actorId: string, buildingId: string, value: boolean) {
+  const { data, error } = await supabase.from("buildings").update({ needs_census: value, updated_at: new Date().toISOString() }).eq("id", buildingId).select("id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new ApiError("Edificio no encontrado.", 404);
+  await writeAudit(supabase, { actorId, action: value ? "BUILDING_NEEDS_CENSUS" : "BUILDING_CENSUS_DONE", entityType: "building", entityId: buildingId });
+  return {};
 }
 
 /** Creates an official building with its first structure (version 1). Cleans up on failure. */
@@ -130,14 +141,58 @@ export async function proposeBuilding(supabase: AdminSupabase, profile: SessionP
   return { id: data.id as string };
 }
 
-export async function decideProposal(supabase: AdminSupabase, profile: SessionProfile, input: { id: string; approve: boolean; note?: string | null }) {
+export const MIN_BUILDING_UNITS = 6;
+
+export type WebProposalInput = { address: string; unit_count: number; photo_data: string; territory_number?: number | null; contact?: string | null };
+
+/**
+ * "Falta edificio" from the public site: address, how many doorbells it has (6 or more to count as
+ * a building) and a photo of them. Territory is optional there; Servicio/Territorios assign it on approval.
+ */
+export async function proposeBuildingFromWeb(supabase: AdminSupabase, input: WebProposalInput) {
+  const address = input.address.trim().replace(/\s+/g, " ");
+  if (address.length < 3 || address.length > 200) throw new ApiError("Escribí la dirección del edificio.", 422);
+  if (!Number.isInteger(input.unit_count) || input.unit_count < MIN_BUILDING_UNITS) throw new ApiError(`Para ser un edificio tiene que tener ${MIN_BUILDING_UNITS} timbres o más.`, 422);
+  if (!input.photo_data.startsWith("data:image/jpeg;base64,") || input.photo_data.length > 900000) throw new ApiError("Subí una foto de los timbres (JPEG de hasta unos 600 KB).", 422);
+
+  let territoryId: string | null = null;
+  if (input.territory_number) {
+    const { data: territory } = await supabase.from("territories").select("id").eq("number", input.territory_number).eq("active", true).maybeSingle();
+    if (!territory) throw new ApiError("Ese territorio no existe.", 422);
+    territoryId = territory.id as string;
+  }
+  const { data: existing } = await supabase.from("buildings").select("id").ilike("address", address).eq("status", "ACTIVE").maybeSingle();
+  if (existing) throw new ApiError("Ese edificio ya está cargado. Buscalo por dirección.", 409);
+  const { data: pending } = await supabase.from("building_proposals").select("id").eq("status", "PENDING").ilike("address", address).maybeSingle();
+  if (pending) throw new ApiError("Ya hay una solicitud pendiente para ese edificio.", 409);
+
+  const contact = (input.contact ?? "").trim().slice(0, 120);
+  const { data, error } = await supabase.from("building_proposals").insert({ territory_id: territoryId, address, proposed_by: null, photo_data: input.photo_data, unit_count: input.unit_count, source: "WEB", decision_note: null }).select("id").single();
+  if (error || !data) throw new Error(error?.message ?? "No se pudo registrar la solicitud.");
+  await writeAudit(supabase, { actorId: null, action: "BUILDING_PROPOSED", entityType: "building_proposal", entityId: data.id, metadata: { territory_id: territoryId, source: "WEB", unit_count: input.unit_count, contact: contact || null }, after: { address } });
+  const title = `Desde el sitio web piden agregar un edificio: ${address} (${input.unit_count} timbres).`;
+  for (const recipientId of await resolveTerritoryManagerIds(supabase)) {
+    await safeEmit({ type: "BUILDING_PROPOSED", naturalKey: `building-proposal:${data.id}:${recipientId}`, actorId: null, payload: { recipientId, proposalId: data.id, title } });
+  }
+  return { id: data.id as string };
+}
+
+export async function proposalPhoto(supabase: AdminSupabase, proposalId: string) {
+  const { data, error } = await supabase.from("building_proposals").select("photo_data").eq("id", proposalId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data?.photo_data as string | null) ?? null;
+}
+
+export async function decideProposal(supabase: AdminSupabase, profile: SessionProfile, input: { id: string; approve: boolean; note?: string | null; territory_id?: string | null }) {
   const { data: proposal, error } = await supabase.from("building_proposals").select("id, territory_id, address, status, proposed_by").eq("id", input.id).maybeSingle();
   if (error) throw new Error(error.message);
   if (!proposal) throw new ApiError("Propuesta no encontrada.", 404);
   if (proposal.status !== "PENDING") throw new ApiError("Esa propuesta ya fue resuelta.", 409);
-  const buildingId = input.approve ? await createBuilding(supabase, { territory_id: proposal.territory_id as string, address: proposal.address as string, actorId: profile.id }) : null;
+  const territoryId = (input.territory_id ?? (proposal.territory_id as string | null)) || null;
+  if (input.approve && !territoryId) throw new ApiError("Elegí el territorio al que pertenece el edificio.", 422);
+  const buildingId = input.approve ? await createBuilding(supabase, { territory_id: territoryId as string, address: proposal.address as string, actorId: profile.id }) : null;
   // Matching on PENDING makes two managers deciding at once resolve cleanly (the second one loses).
-  const { data: decided, error: decideError } = await supabase.from("building_proposals").update({ status: input.approve ? "APPROVED" : "REJECTED", decided_by: profile.id, decided_at: new Date().toISOString(), decision_note: input.note || null, building_id: buildingId }).eq("id", input.id).eq("status", "PENDING").select("id");
+  const { data: decided, error: decideError } = await supabase.from("building_proposals").update({ status: input.approve ? "APPROVED" : "REJECTED", decided_by: profile.id, decided_at: new Date().toISOString(), decision_note: input.note || null, building_id: buildingId, territory_id: territoryId }).eq("id", input.id).eq("status", "PENDING").select("id");
   if (decideError) throw new Error(decideError.message);
   if (!decided?.length) throw new ApiError("Otra persona ya resolvió esa propuesta.", 409);
   await writeAudit(supabase, { actorId: profile.id, action: input.approve ? "BUILDING_PROPOSAL_APPROVED" : "BUILDING_PROPOSAL_REJECTED", entityType: "building_proposal", entityId: input.id, metadata: { building_id: buildingId }, after: { address: proposal.address } });
@@ -160,6 +215,8 @@ export async function saveStructure(supabase: AdminSupabase, actorId: string, in
     throw new Error(error.message);
   }
   await writeAudit(supabase, { actorId, action: "BUILDING_STRUCTURE_SAVED", entityType: "building", entityId: input.building_id, metadata: { version: data, report_id: input.report_id ?? null }, after: { units: validated.units.length } });
+  // Applying a census report is the fix itself: the building is censused again.
+  if (input.report_id) await supabase.from("buildings").update({ needs_census: false }).eq("id", input.building_id);
   // Removing doorbells can complete the current round; a round-evaluation hiccup never undoes the save.
   try {
     await evaluateRound(supabase, input.building_id, actorId);

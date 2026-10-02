@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { S13_SLOTS_PER_PAGE, buildS13Pages, formatS13Date, type S13Round } from "../src/modules/s13/layout";
 
-const round = (id: string, assigned: string, completed: string | null, name: string): S13Round => ({ id, assigned_on: assigned, completed_on: completed, conductor_name: name });
+const round = (id: string, assigned: string, completed: string | null, name: string): S13Round => ({ id, assigned_on: assigned, completed_on: completed, conductor_name: name, is_test: false });
 
 test("las fechas se imprimen como en el documento: día-mes-año sin ceros", () => {
   assert.equal(formatS13Date("2026-07-05"), "5-7-26");

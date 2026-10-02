@@ -12,7 +12,7 @@ import type { CensusRow } from "./census-inbox";
 import { describeDiff } from "@/modules/buildings/structure";
 import { useModuleApi } from "../use-module-api";
 
-export type BuildingData = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; units: Unit[] };
+export type BuildingData = { id: string; territory_id: string; territory_number: number; address: string; status: string; structure_version: number; needs_census: boolean; units: Unit[] };
 type Detail = { canManage: boolean; me: string; me_name: string; building: BuildingData; statuses: Record<string, UnitStatusView>; round: { current: { round_number: number; started_at: string; total: number; done: number } | null; history: { round_number: number; started_at: string; closed_at: string }[] } };
 
 function StructureEditor({ building, onSaved, onCancel }: { building: BuildingData; onSaved: () => void; onCancel: () => void }) {
@@ -106,6 +106,10 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
     setUnlockMessage(response.ok ? `Desbloqueado: ${body.unlocked ?? 0} registro(s) liberados.` : body.error ?? "No se pudo desbloquear.");
     if (response.ok) void reload();
   }
+  async function setCensus(value: boolean) {
+    const response = await fetch("/api/v2/buildings", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "setNeedsCensus", payload: { building_id: building.id, value } }) });
+    if (response.ok) void reload();
+  }
   return (
     <div className="space-y-3">
       <button className={miniButtonClass} onClick={onBack} type="button"><ArrowLeft size={14} aria-hidden="true" />Volver</button>
@@ -118,7 +122,7 @@ export function BuildingDetail({ buildingId, onBack, renderUnit, evidence, start
       {roundNote ? <Notice tone="success">{roundNote}</Notice> : null}
       {reported ? <Notice tone="success">Informe enviado: Servicio y Territorios lo van a revisar.</Notice> : null}
       {reporting ? <CensusReportForm buildingId={building.id} onCancel={() => setReporting(false)} onDone={() => { setReporting(false); setReported(true); }} units={building.units} version={building.structure_version} /> : null}
-      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}${data.round.current ? ` · Vuelta ${data.round.current.round_number}: ${data.round.current.done} de ${data.round.current.total} trabajados` : ""}`} action={<div className="flex items-center gap-2">{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}{canManage && !editing ? (unlockConfirm ? (<><button className={miniButtonClass} onClick={() => void unlock(unlockConfirm === "building" ? "BUILDING" : "TERRITORY")} type="button">Confirmar desbloqueo {unlockConfirm === "building" ? "del edificio" : `del territorio ${building.territory_number}`}</button><button className={miniButtonClass} onClick={() => setUnlockConfirm(null)} type="button">Cancelar</button></>) : (<><button className={miniButtonClass} onClick={() => setUnlockConfirm("building")} type="button">Desbloquear edificio</button><button className={miniButtonClass} onClick={() => setUnlockConfirm("territory")} type="button">Desbloquear territorio</button></>)) : null}</div>}>
+      <Card title={building.address} description={`Territorio ${building.territory_number} · ${building.units.length} timbre${building.units.length === 1 ? "" : "s"}${data.round.current ? ` · Vuelta ${data.round.current.round_number}: ${data.round.current.done} de ${data.round.current.total} trabajados` : ""}`} action={<div className="flex items-center gap-2">{building.needs_census ? <Pill tone="amber">Falta censar</Pill> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => void setCensus(!building.needs_census)} type="button">{building.needs_census ? "Marcar como censado" : "Marcar falta censar"}</button> : null}{building.status !== "ACTIVE" ? <Pill tone="slate">Inactivo</Pill> : null}{!editing && !reporting ? <button className={miniButtonClass} onClick={() => setReporting(true)} type="button"><AlertTriangle size={14} aria-hidden="true" />Falta censar</button> : null}{canManage && !editing ? <button className={miniButtonClass} onClick={() => setEditing(true)} type="button"><Pencil size={14} aria-hidden="true" />Editar estructura</button> : null}{canManage && !editing ? (unlockConfirm ? (<><button className={miniButtonClass} onClick={() => void unlock(unlockConfirm === "building" ? "BUILDING" : "TERRITORY")} type="button">Confirmar desbloqueo {unlockConfirm === "building" ? "del edificio" : `del territorio ${building.territory_number}`}</button><button className={miniButtonClass} onClick={() => setUnlockConfirm(null)} type="button">Cancelar</button></>) : (<><button className={miniButtonClass} onClick={() => setUnlockConfirm("building")} type="button">Desbloquear edificio</button><button className={miniButtonClass} onClick={() => setUnlockConfirm("territory")} type="button">Desbloquear territorio</button></>)) : null}</div>}>
         {editing ? (
           <StructureEditor building={building} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />
         ) : building.units.length ? (
